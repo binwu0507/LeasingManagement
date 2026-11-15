@@ -7,12 +7,18 @@ function createWindow() {
     width: 1100,
     height: 700,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      // electron-vite builds main, preload and renderer into out/<name>/
+      preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
   });
-  win.loadFile('index.html');
+
+  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
+    win.loadURL(process.env.ELECTRON_RENDERER_URL); // Vite dev server (hot reload)
+  } else {
+    win.loadFile(path.join(__dirname, '../renderer/index.html'));
+  }
 }
 
 // Run a store action and return { ok, data } or { ok, error } so the page
