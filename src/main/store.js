@@ -3,7 +3,7 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const FIELDS = [
   'address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft',
   'monthlyRent', 'propertyTax', 'hoaFee', 'mortgage', 'insurance', 'repairCost'
@@ -60,7 +60,7 @@ function validate(data) {
   return clean;
 }
 
-// Open the database, create/migrate the schema.
+// Open the database and create/migrate the schema.
 function init() {
   if (db) return;
   db = new DatabaseSync(path.join(app.getPath('userData'), 'leasing.db'));
@@ -87,9 +87,17 @@ function init() {
       );
     `);
   }
-  // Future migrations: if (version < 2) { db.exec('ALTER TABLE ...'); }
+  if (version < 2) {
+    // Records are organized by year. Existing rows move into the current year.
+    const currentYear = new Date().getFullYear();
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS years (year INTEGER PRIMARY KEY);
+      ALTER TABLE properties ADD COLUMN year INTEGER NOT NULL DEFAULT ${currentYear};
+      CREATE INDEX IF NOT EXISTS idx_properties_year ON properties (year);
+      INSERT OR IGNORE INTO years (year) SELECT DISTINCT year FROM properties;
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-
 }
 
 function close() {
@@ -97,26 +105,48 @@ function close() {
   db = null;
 }
 
+function validYear(v) {
+  const year = Number(v);
+  if (!Number.isInteger(year) || year < 1900 || year > 2200) {
+    throw new Error('Year must be a whole number between 1900 and 2200.');
+  }
+  return year;
+}
+
 const toPlain = (row) => ({ ...row });
 
-function list() {
-  return db.prepare('SELECT * FROM properties ORDER BY id').all().map(toPlain);
+function listYears() {
+  return db.prepare('SELECT year FROM years ORDER BY year DESC').all().map((r) => r.year);
+}
+
+function addYear(value) {
+  const year = validYear(value);
+  db.prepare('INSERT OR IGNORE INTO years (year) VALUES (?)').run(year);
+  return year;
+}
+
+function list(yearValue) {
+  const year = validYear(yearValue);
+  return db.prepare('SELECT * FROM properties WHERE year = ? ORDER BY id').all(year).map(toPlain);
 }
 
 function get(id) {
   return toPlain(db.prepare('SELECT * FROM properties WHERE id = ?').get(id));
 }
 
-function add(data) {
+function add(yearValue, data) {
+  const year = validYear(yearValue);
   const clean = validate(data);
-  const cols = FIELDS.join(', ');
-  const params = FIELDS.map((f) => '@' + f).join(', ');
+  addYear(year);
+  const cols = ['year', ...FIELDS].join(', ');
+  const params = ['year', ...FIELDS].map((f) => '@' + f).join(', ');
   const { lastInsertRowid } = db
     .prepare(`INSERT INTO properties (${cols}) VALUES (${params})`)
-    .run(clean);
+    .run({ ...clean, year });
   return get(Number(lastInsertRowid));
 }
 
+// The year of an existing record never changes.
 function update(id, data) {
   const clean = validate(data);
   const sets = FIELDS.map((f) => `${f} = @${f}`).join(', ');
@@ -132,4 +162,4 @@ function remove(id) {
   if (changes === 0) throw new Error('Property not found.');
 }
 
-module.exports = { init, close, list, add, update, remove };
+module.exports = { init, close, listYears, addYear, list, add, update, remove };

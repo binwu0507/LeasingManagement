@@ -99,3 +99,11 @@ form input, form select {
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .error { color: #b42318; margin: 0 0 8px; }
 [hidden] { display: none !important; }
+
+/* Year selection */
+#year-select { max-width: 480px; margin: 60px auto; text-align: center; }
+.year-list { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 20px 0; }
+.year-list button { font-size: 1.1rem; padding: 10px 22px; }
+.year-add { display: flex; gap: 10px; align-items: end; justify-content: center; margin-top: 24px; }
+.year-add label, .year-switch { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; text-align: left; }
+.header-actions { display: flex; gap: 12px; align-items: end; margin-left: auto; margin-right: 12px; }

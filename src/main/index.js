@@ -31,8 +31,10 @@ function respond(action) {
   }
 }
 
-ipcMain.handle('properties:list', () => respond(() => store.list()));
-ipcMain.handle('properties:add', (event, data) => respond(() => store.add(data)));
+ipcMain.handle('years:list', () => respond(() => store.listYears()));
+ipcMain.handle('years:add', (event, year) => respond(() => store.addYear(year)));
+ipcMain.handle('properties:list', (event, year) => respond(() => store.list(year)));
+ipcMain.handle('properties:add', (event, year, data) => respond(() => store.add(year, data)));
 ipcMain.handle('properties:update', (event, id, data) => respond(() => store.update(id, data)));
 ipcMain.handle('properties:delete', (event, id) => respond(() => store.remove(id)));
 
