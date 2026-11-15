@@ -1,7 +1,15 @@
-// In-memory storage for properties. Swap this module for a database later.
+// SQLite storage for properties (built-in node:sqlite, file in the app's userData folder).
+const path = require('path');
+const { app } = require('electron');
+const { DatabaseSync } = require('node:sqlite');
 
-let nextId = 1;
-const properties = [];
+const SCHEMA_VERSION = 1;
+const FIELDS = [
+  'address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft',
+  'monthlyRent', 'propertyTax', 'hoaFee', 'mortgage', 'insurance', 'repairCost'
+];
+
+let db = null;
 
 function validate(data) {
   const d = data || {};
@@ -52,32 +60,76 @@ function validate(data) {
   return clean;
 }
 
+// Open the database, create/migrate the schema.
+function init() {
+  if (db) return;
+  db = new DatabaseSync(path.join(app.getPath('userData'), 'leasing.db'));
+  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+
+  const { user_version: version } = db.prepare('PRAGMA user_version').get();
+  if (version < 1) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS properties (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        address TEXT NOT NULL,
+        city TEXT NOT NULL,
+        state TEXT,
+        zip TEXT,
+        bedrooms REAL NOT NULL,
+        bathrooms REAL NOT NULL,
+        sqft REAL NOT NULL,
+        monthlyRent REAL NOT NULL,
+        propertyTax REAL NOT NULL,
+        hoaFee REAL NOT NULL,
+        mortgage REAL NOT NULL,
+        insurance REAL,
+        repairCost REAL
+      );
+    `);
+  }
+  // Future migrations: if (version < 2) { db.exec('ALTER TABLE ...'); }
+  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+
+}
+
+function close() {
+  if (db) db.close();
+  db = null;
+}
+
+const toPlain = (row) => ({ ...row });
+
 function list() {
-  return properties.map((p) => ({ ...p }));
+  return db.prepare('SELECT * FROM properties ORDER BY id').all().map(toPlain);
+}
+
+function get(id) {
+  return toPlain(db.prepare('SELECT * FROM properties WHERE id = ?').get(id));
 }
 
 function add(data) {
-  const property = { id: nextId++, ...validate(data) };
-  properties.push(property);
-  return { ...property };
+  const clean = validate(data);
+  const cols = FIELDS.join(', ');
+  const params = FIELDS.map((f) => '@' + f).join(', ');
+  const { lastInsertRowid } = db
+    .prepare(`INSERT INTO properties (${cols}) VALUES (${params})`)
+    .run(clean);
+  return get(Number(lastInsertRowid));
 }
 
 function update(id, data) {
-  const property = properties.find((p) => p.id === id);
-  if (!property) throw new Error('Property not found.');
-  Object.assign(property, validate(data));
-  return { ...property };
+  const clean = validate(data);
+  const sets = FIELDS.map((f) => `${f} = @${f}`).join(', ');
+  const { changes } = db
+    .prepare(`UPDATE properties SET ${sets} WHERE id = @id`)
+    .run({ ...clean, id });
+  if (changes === 0) throw new Error('Property not found.');
+  return get(id);
 }
 
 function remove(id) {
-  const index = properties.findIndex((p) => p.id === id);
-  if (index === -1) throw new Error('Property not found.');
-  properties.splice(index, 1);
+  const { changes } = db.prepare('DELETE FROM properties WHERE id = ?').run(id);
+  if (changes === 0) throw new Error('Property not found.');
 }
 
-// Sample data
-add({ address: '12 Maple Street', city: 'Springfield', state: 'IL', zip: '62701', bedrooms: 3, bathrooms: 2, sqft: 1600, monthlyRent: 1850, propertyTax: 3600, hoaFee: 45, insurance: 1200, mortgage: 1100, repairCost: 850 });
-add({ address: '48 Oak Avenue', city: 'Springfield', state: 'IL', zip: '62704', bedrooms: 4, bathrooms: 3, sqft: 2200, monthlyRent: 2400, propertyTax: 5200, hoaFee: 120, insurance: 1500, mortgage: 1650 });
-add({ address: '7 Birch Lane', city: 'Riverton', state: 'IL', zip: '62561', bedrooms: 2, bathrooms: 1, sqft: 1100, monthlyRent: 1300, propertyTax: 2400, hoaFee: 30, mortgage: 800 });
-
-module.exports = { list, add, update, remove };
+module.exports = { init, close, list, add, update, remove };

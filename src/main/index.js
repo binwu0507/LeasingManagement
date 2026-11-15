@@ -37,11 +37,14 @@ ipcMain.handle('properties:update', (event, id, data) => respond(() => store.upd
 ipcMain.handle('properties:delete', (event, id) => respond(() => store.remove(id)));
 
 app.whenReady().then(() => {
+  store.init();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+app.on('before-quit', () => store.close());
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
