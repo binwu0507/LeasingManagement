@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import PropertyTable from './components/PropertyTable.jsx';
 import PropertyForm from './components/PropertyForm.jsx';
 import YearlySummary from './components/YearlySummary.jsx';
+import CopyFromYear from './components/CopyFromYear.jsx';
 import YearSelect from './components/YearSelect.jsx';
 
 export default function App() {
@@ -10,17 +11,24 @@ export default function App() {
   const [properties, setProperties] = useState([]);
   // undefined = dialog closed, null = adding, object = editing that house
   const [editing, setEditing] = useState(undefined);
+  const [copying, setCopying] = useState(false);
 
   // The main process owns the data; reload the full list after every change
   const refresh = useCallback(async () => {
-    if (year === null) return;
+    if (year === null) {
+      return;
+    }
     const res = await window.api.properties.list(year);
-    if (res.ok) setProperties(res.data);
+    if (res.ok) {
+      setProperties(res.data);
+    }
   }, [year]);
 
   const loadYears = useCallback(async () => {
     const res = await window.api.years.list();
-    if (res.ok) setYears(res.data);
+    if (res.ok) {
+      setYears(res.data);
+    }
   }, []);
 
   useEffect(() => {
@@ -35,7 +43,9 @@ export default function App() {
   // Returns an error message, or nothing on success
   async function addYear(value) {
     const res = await window.api.years.add(value);
-    if (!res.ok) return res.error;
+    if (!res.ok) {
+      return res.error;
+    }
     await loadYears();
     setYear(res.data);
   }
@@ -45,16 +55,32 @@ export default function App() {
     const res = editing
       ? await window.api.properties.update(editing.id, values)
       : await window.api.properties.add(year, values);
-    if (!res.ok) return res.error;
+    if (!res.ok) {
+      return res.error;
+    }
     setEditing(undefined);
     refresh();
   }
 
+  async function copyFrom(source, ids) {
+    const res = await window.api.properties.copyFromYear(year, source, ids);
+    if (!res.ok) {
+      return res.error;
+    }
+    setCopying(false);
+    refresh();
+  }
+
   async function remove(p) {
-    if (!confirm(`Delete ${p.address}, ${p.city}?`)) return;
+    if (!confirm(`Delete ${p.address}, ${p.city}?`)) {
+      return;
+    }
     const res = await window.api.properties.remove(p.id);
-    if (res.ok) refresh();
-    else alert(res.error);
+    if (res.ok) {
+      refresh();
+    } else {
+      alert(res.error);
+    }
   }
 
   if (year === null) {
@@ -74,6 +100,13 @@ export default function App() {
           </label>
           <button onClick={() => setYear(null)}>Change / add year</button>
         </div>
+        <button
+          onClick={() => setCopying(true)}
+          disabled={years.length < 2}
+          title={years.length < 2 ? 'No other year to copy from' : ''}
+        >
+          Copy from year…
+        </button>
         <button className="primary" onClick={() => setEditing(null)}>+ Add House</button>
       </header>
 
@@ -81,6 +114,15 @@ export default function App() {
         <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} />
         <YearlySummary properties={properties} />
       </main>
+
+      {copying && (
+        <CopyFromYear
+          years={years.filter((y) => y !== year)}
+          existing={properties}
+          onCopy={copyFrom}
+          onCancel={() => setCopying(false)}
+        />
+      )}
 
       {editing !== undefined && (
         <PropertyForm

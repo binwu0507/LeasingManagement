@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
     list: (year) => ipcRenderer.invoke('properties:list', year),
     add: (year, data) => ipcRenderer.invoke('properties:add', year, data),
     update: (id, data) => ipcRenderer.invoke('properties:update', id, data),
+    copyFromYear: (target, source, ids) => ipcRenderer.invoke('properties:copy', target, source, ids),
     remove: (id) => ipcRenderer.invoke('properties:delete', id)
   }
 });

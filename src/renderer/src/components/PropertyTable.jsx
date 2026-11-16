@@ -12,6 +12,7 @@ export default function PropertyTable({ properties, onEdit, onDelete }) {
     <table>
       <thead>
         <tr>
+          <th>Property ID</th>
           <th>Address</th>
           <th>City</th>
           <th>State</th>
@@ -33,7 +34,7 @@ export default function PropertyTable({ properties, onEdit, onDelete }) {
       </tbody>
       <tfoot>
         <tr>
-          <td colSpan={7}>Annual totals</td>
+          <td colSpan={8}>Annual totals</td>
           {MONEY_COLUMNS.map((col) => (
             <td key={col.field} className="num">{money.format(totals[col.field])}</td>
           ))}

@@ -23,7 +23,9 @@ export default function PropertyForm({ property, onSave, onCancel }) {
 
   useEffect(() => {
     const dialog = dialogRef.current;
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      dialog.showModal();
+    }
   }, []);
 
   const set = (e) => setValues((v) => ({ ...v, [e.target.name]: e.target.value }));
@@ -31,7 +33,9 @@ export default function PropertyForm({ property, onSave, onCancel }) {
   async function submit(e) {
     e.preventDefault();
     const err = await onSave(values);
-    if (err) setError(err);
+    if (err) {
+      setError(err);
+    }
   }
 
   const field = (label, name, props = {}) => (

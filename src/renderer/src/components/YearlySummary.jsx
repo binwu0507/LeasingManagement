@@ -1,7 +1,9 @@
 import { money, yearlySummary } from '../finance.js';
 
 export default function YearlySummary({ properties }) {
-  if (properties.length === 0) return null;
+  if (properties.length === 0) {
+    return null;
+  }
   const { rentIncome, expenses, net } = yearlySummary(properties);
 
   return (

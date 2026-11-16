@@ -3,7 +3,7 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const FIELDS = [
   'address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft',
   'monthlyRent', 'propertyTax', 'hoaFee', 'mortgage', 'insurance', 'repairCost'
@@ -34,8 +34,12 @@ function validate(data) {
     repairCost: optNum(d.repairCost)    // total repair spend (optional)
   };
 
-  if (!clean.address) throw new Error('Address is required.');
-  if (!clean.city) throw new Error('City is required.');
+  if (!clean.address) {
+    throw new Error('Address is required.');
+  }
+  if (!clean.city) {
+    throw new Error('City is required.');
+  }
   for (const [field, label] of [
     ['bedrooms', 'Bedrooms'],
     ['bathrooms', 'Bathrooms'],
@@ -62,7 +66,9 @@ function validate(data) {
 
 // Open the database and create/migrate the schema.
 function init() {
-  if (db) return;
+  if (db) {
+    return;
+  }
   db = new DatabaseSync(path.join(app.getPath('userData'), 'leasing.db'));
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
 
@@ -97,11 +103,27 @@ function init() {
       INSERT OR IGNORE INTO years (year) SELECT DISTINCT year FROM properties;
     `);
   }
+  if (version < 3) {
+    // propertyId ties together the yearly records of the same house.
+    // Backfill: existing rows with the same address/city/zip share one propertyId.
+    db.exec(`
+      ALTER TABLE properties ADD COLUMN propertyId INTEGER;
+      UPDATE properties SET propertyId = (
+        SELECT MIN(p2.id) FROM properties p2
+        WHERE lower(p2.address) = lower(properties.address)
+          AND lower(p2.city) = lower(properties.city)
+          AND lower(COALESCE(p2.zip, '')) = lower(COALESCE(properties.zip, ''))
+      );
+      CREATE INDEX IF NOT EXISTS idx_properties_propertyId ON properties (propertyId);
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
 function close() {
-  if (db) db.close();
+  if (db) {
+    db.close();
+  }
   db = null;
 }
 
@@ -143,7 +165,17 @@ function add(yearValue, data) {
   const { lastInsertRowid } = db
     .prepare(`INSERT INTO properties (${cols}) VALUES (${params})`)
     .run({ ...clean, year });
-  return get(Number(lastInsertRowid));
+  const id = Number(lastInsertRowid);
+  // Same address/city/zip as a house in another year -> same property; otherwise a new one.
+  const match = db.prepare(`
+    SELECT propertyId FROM properties
+    WHERE id != ? AND propertyId IS NOT NULL
+      AND lower(address) = lower(?) AND lower(city) = lower(?)
+      AND lower(COALESCE(zip, '')) = lower(?)
+    ORDER BY id LIMIT 1
+  `).get(id, clean.address, clean.city, clean.zip);
+  db.prepare('UPDATE properties SET propertyId = ? WHERE id = ?').run(match ? match.propertyId : id, id);
+  return get(id);
 }
 
 // The year of an existing record never changes.
@@ -153,13 +185,61 @@ function update(id, data) {
   const { changes } = db
     .prepare(`UPDATE properties SET ${sets} WHERE id = @id`)
     .run({ ...clean, id });
-  if (changes === 0) throw new Error('Property not found.');
+  if (changes === 0) {
+    throw new Error('Property not found.');
+  }
   return get(id);
 }
 
 function remove(id) {
   const { changes } = db.prepare('DELETE FROM properties WHERE id = ?').run(id);
-  if (changes === 0) throw new Error('Property not found.');
+  if (changes === 0) {
+    throw new Error('Property not found.');
+  }
 }
 
-module.exports = { init, close, listYears, addYear, list, add, update, remove };
+// Copy selected houses from another year. Only descriptive fields are copied;
+// monetary fields are reset (required ones to 0, optional ones to null).
+// Houses already in the target year (same address, city, zip) are skipped.
+function copyFromYear(targetValue, sourceValue, ids) {
+  const target = validYear(targetValue);
+  const source = validYear(sourceValue);
+  if (target === source) {
+    throw new Error('Choose a different year to copy from.');
+  }
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new Error('Select at least one house.');
+  }
+
+  // A house is "already there" if the target year has a record of the same propertyId.
+  const existing = new Set(list(target).map((p) => p.propertyId));
+  const insert = db.prepare(`
+    INSERT INTO properties (year, propertyId, address, city, state, zip, bedrooms, bathrooms, sqft,
+                            monthlyRent, propertyTax, hoaFee, mortgage, insurance, repairCost)
+    VALUES (@year, @propertyId, @address, @city, @state, @zip, @bedrooms, @bathrooms, @sqft, 0, 0, 0, 0, NULL, NULL)
+  `);
+  const wanted = new Set(ids.map(Number));
+  let copied = 0;
+  db.exec('BEGIN');
+  try {
+    addYear(target);
+    for (const p of list(source)) {
+      if (!wanted.has(p.id) || existing.has(p.propertyId)) {
+        continue;
+      }
+      insert.run({
+        year: target, propertyId: p.propertyId, address: p.address, city: p.city, state: p.state, zip: p.zip,
+        bedrooms: p.bedrooms, bathrooms: p.bathrooms, sqft: p.sqft
+      });
+      existing.add(p.propertyId);
+      copied++;
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return copied;
+}
+
+module.exports = { init, close, listYears, addYear, list, add, update, remove, copyFromYear };

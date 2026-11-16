@@ -36,18 +36,24 @@ ipcMain.handle('years:add', (event, year) => respond(() => store.addYear(year)))
 ipcMain.handle('properties:list', (event, year) => respond(() => store.list(year)));
 ipcMain.handle('properties:add', (event, year, data) => respond(() => store.add(year, data)));
 ipcMain.handle('properties:update', (event, id, data) => respond(() => store.update(id, data)));
+ipcMain.handle('properties:copy', (event, target, source, ids) =>
+  respond(() => store.copyFromYear(target, source, ids)));
 ipcMain.handle('properties:delete', (event, id) => respond(() => store.remove(id)));
 
 app.whenReady().then(() => {
   store.init();
   createWindow();
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
   });
 });
 
 app.on('before-quit', () => store.close());
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
 });

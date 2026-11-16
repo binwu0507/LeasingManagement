@@ -4,6 +4,7 @@ export default function PropertyRow({ property: p, onEdit, onDelete }) {
   const net = netIncome(p);
   return (
     <tr>
+      <td>{p.propertyId}</td>
       <td>{p.address}</td>
       <td>{p.city}</td>
       <td>{p.state}</td>
