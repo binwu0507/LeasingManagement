@@ -8,7 +8,8 @@ import YearSelect from './components/YearSelect.jsx';
 export default function App() {
   const [years, setYears] = useState([]);
   const [year, setYear] = useState(null); // null = start screen, nothing chosen yet
-  const [properties, setProperties] = useState([]);
+  const [properties, setProperties] = useState([]); // records of the selected year
+  const [allProperties, setAllProperties] = useState([]); // houses, for the home page
   // undefined = dialog closed, null = adding, object = editing that house
   const [editing, setEditing] = useState(undefined);
   const [copying, setCopying] = useState(false);
@@ -31,9 +32,20 @@ export default function App() {
     }
   }, []);
 
+  const loadAll = useCallback(async () => {
+    const res = await window.api.properties.listAll();
+    if (res.ok) {
+      setAllProperties(res.data);
+    }
+  }, []);
+
+  // Reload the home data whenever we land on the home page
   useEffect(() => {
-    loadYears();
-  }, [loadYears]);
+    if (year === null) {
+      loadYears();
+      loadAll();
+    }
+  }, [year, loadYears, loadAll]);
 
   useEffect(() => {
     setProperties([]);
@@ -84,13 +96,14 @@ export default function App() {
   }
 
   if (year === null) {
-    return <YearSelect years={years} onSelect={setYear} onAddYear={addYear} />;
+    return <YearSelect years={years} properties={allProperties} onSelect={setYear} onAddYear={addYear} />;
   }
 
   return (
     <>
       <header>
-        <h1>Properties</h1>
+        <button onClick={() => setYear(null)}>← Home</button>
+        <h1>Properties {year}</h1>
         <div className="header-actions">
           <label className="year-switch">
             Year
@@ -98,7 +111,6 @@ export default function App() {
               {years.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </label>
-          <button onClick={() => setYear(null)}>Change / add year</button>
         </div>
         <button
           onClick={() => setCopying(true)}

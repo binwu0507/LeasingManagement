@@ -300,6 +300,19 @@ function addYear(value) {
   return year;
 }
 
+// Houses only (no yearly figures), with the years each one has a record for.
+function listProperties() {
+  return db.prepare(`
+    SELECT p.id, ${PROPERTY_FIELDS.map((f) => 'p.' + f).join(', ')},
+           (SELECT group_concat(year) FROM (
+              SELECT year FROM property_years WHERE propertyId = p.id ORDER BY year DESC)) AS yearList
+    FROM properties p ORDER BY lower(p.address), p.id
+  `).all().map((r) => ({
+    ...r,
+    years: r.yearList ? r.yearList.split(',').map(Number) : []
+  }));
+}
+
 function list(yearValue) {
   const year = validYear(yearValue);
   return db.prepare(`${SELECT_RECORD} WHERE y.year = ? ORDER BY y.id`).all(year).map(toPlain);
@@ -444,4 +457,4 @@ function copyFromYear(targetValue, sourceValue, ids) {
   return copied;
 }
 
-module.exports = { init, close, listYears, addYear, list, add, update, remove, copyFromYear };
+module.exports = { init, close, listYears, addYear, listProperties, list, add, update, remove, copyFromYear };
