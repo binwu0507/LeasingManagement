@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import MapDialog from './MapDialog.jsx';
 
 /**
  * Home page: lists every property (no yearly figures) with a year selector
@@ -8,6 +9,7 @@ import { useState } from 'react';
 export default function YearSelect({ years, properties, onSelect, onAddYear, onEdit }) {
   const [newYear, setNewYear] = useState(String(new Date().getFullYear()));
   const [error, setError] = useState('');
+  const [mapFor, setMapFor] = useState(null); // property whose map is open
 
   async function add(e) {
     e.preventDefault();
@@ -74,7 +76,18 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
             <tbody>
               {properties.map((p) => (
                 <tr key={p.id}>
-                  <td>{p.address}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="map-icon"
+                      onClick={() => setMapFor(p)}
+                      title="Show on map"
+                      aria-label={`Show ${p.address} on map`}
+                    >
+                      📍
+                    </button>
+                    {p.address}
+                  </td>
                   <td>{p.city}</td>
                   <td>{p.state}</td>
                   <td>{p.zip}</td>
@@ -91,6 +104,8 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
           </table>
         )}
       </main>
+
+      {mapFor && <MapDialog property={mapFor} onClose={() => setMapFor(null)} />}
     </>
   );
 }

@@ -126,3 +126,10 @@ dialog:has(.repairs) { width: 640px; }
 .repair-table th:nth-child(5), .repair-table td:nth-child(5) { width: 24px; }
 button.link { background: none; border: none; padding: 0; font: inherit; font-weight: inherit; color: inherit; cursor: pointer; }
 .repair-table th button.link:hover { color: #1f2733; text-decoration: underline; }
+
+/* Property map popup */
+dialog.map-dialog { width: 760px; }
+.map-dialog h2 { font-size: 1.05rem; }
+.map-dialog iframe { display: block; width: 100%; height: 440px; border: 1px solid #d5d9df; border-radius: 8px; }
+.map-icon { background: none; border: none; padding: 0 6px 0 0; font-size: 1rem; line-height: 1; cursor: pointer; }
+.map-icon:hover { filter: brightness(0.85); }
