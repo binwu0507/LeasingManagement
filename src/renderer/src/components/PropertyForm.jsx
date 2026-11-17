@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
+import { money as formatMoney } from '../finance.js';
 
 const EMPTY = {
   address: '', city: '', state: '', zip: '',
   bedrooms: 0, bathrooms: 0, sqft: 0, purchaseDate: '',
   monthlyRent: 0, mortgage: 0, hoaFee: 0, propertyTax: 0,
-  insurance: '', repairCost: '', mortgageInterest: ''
+  insurance: '', mortgageInterest: '',
+  repairItems: []
 };
 
+const EMPTY_ITEM = { date: '', amount: '', contractor: '', description: '' };
+
 // Convert a stored property (nulls for blank optionals) into form values
-const toForm = (p) => Object.fromEntries(
-  Object.keys(EMPTY).map((k) => [k, p[k] ?? ''])
-);
+const toForm = (p) => ({
+  ...Object.fromEntries(Object.keys(EMPTY).map((k) => [k, p[k] ?? ''])),
+  repairItems: (p.repairItems || []).map(({ date, amount, contractor, description }) =>
+    ({ date, amount, contractor, description }))
+});
 
 /**
  * Add/edit dialog. `property` is the house being edited, or null when adding.
@@ -20,6 +26,7 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
   const dialogRef = useRef(null);
   const [values, setValues] = useState(property ? toForm(property) : EMPTY);
   const [error, setError] = useState('');
+  const [sort, setSort] = useState(null); // { key: 'date' | 'amount', dir: 1 | -1 }; last header click
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -37,6 +44,29 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
       setError(err);
     }
   }
+
+  const setItem = (i, e) => setValues((v) => ({
+    ...v,
+    repairItems: v.repairItems.map((it, j) => (j === i ? { ...it, [e.target.name]: e.target.value } : it))
+  }));
+  const addItem = () => {
+    setSort(null);
+    setValues((v) => ({ ...v, repairItems: [...v.repairItems, EMPTY_ITEM] }));
+  };
+  // Reorders the rows once per click (rows don't jump around while you are typing in them).
+  const sortBy = (key) => {
+    const dir = sort && sort.key === key ? -sort.dir : 1;
+    setSort({ key, dir });
+    setValues((v) => ({
+      ...v,
+      repairItems: [...v.repairItems].sort((a, b) =>
+        dir * (key === 'amount' ? (Number(a.amount) || 0) - (Number(b.amount) || 0)
+                                : a.date.localeCompare(b.date)))
+    }));
+  };
+  const arrow = (key) => (sort && sort.key === key ? (sort.dir === 1 ? ' ▲' : ' ▼') : '');
+  const removeItem = (i) => setValues((v) => ({ ...v, repairItems: v.repairItems.filter((_, j) => j !== i) }));
+  const repairTotal = values.repairItems.reduce((t, it) => t + (Number(it.amount) || 0), 0);
 
   const field = (label, name, props = {}) => (
     <label>
@@ -88,11 +118,44 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
             <p className="hint">Optional costs (leave blank if not applicable)</p>
             <div className="row">
               {field('Insurance ($/year)', 'insurance', money)}
-              {field('Repair cost ($)', 'repairCost', money)}
-            </div>
-            <div className="row">
               {field('Mortgage interest ($/year)', 'mortgageInterest', money)}
             </div>
+
+            <fieldset className="repairs">
+              <legend>Total repair cost: {formatMoney.format(repairTotal)}</legend>
+              {values.repairItems.length > 0 && (
+                <div className="repair-scroll">
+                  <table className="repair-table">
+                    <thead>
+                      <tr>
+                        <th><button type="button" className="link" onClick={() => sortBy('date')}>Date{arrow('date')}</button></th>
+                        <th><button type="button" className="link" onClick={() => sortBy('amount')}>Amount ($){arrow('amount')}</button></th>
+                        <th>Contractor</th>
+                        <th>Description</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {values.repairItems.map((it, i) => (
+                        <tr key={i}>
+                          <td><input type="date" name="date" value={it.date} onChange={(e) => setItem(i, e)}
+                            aria-label="Repair date" /></td>
+                          <td><input type="number" name="amount" min={0} step={0.01} value={it.amount}
+                            onChange={(e) => setItem(i, e)} aria-label="Repair amount" /></td>
+                          <td><input type="text" name="contractor" value={it.contractor}
+                            onChange={(e) => setItem(i, e)} aria-label="Contractor" /></td>
+                          <td><input type="text" name="description" value={it.description}
+                            onChange={(e) => setItem(i, e)} aria-label="Repair description" /></td>
+                          <td><button type="button" className="link" onClick={() => removeItem(i)}
+                            title="Remove item" aria-label="Remove repair item">✕</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <button type="button" onClick={addItem}>+ Add repair</button>
+            </fieldset>
           </>
         )}
 

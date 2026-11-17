@@ -4,21 +4,55 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
 const V5_PROPERTY_FIELDS = PROPERTY_FIELDS.filter((f) => f !== 'purchaseDate');
 // Vary by year; stored per year in `property_years`.
-const YEAR_FIELDS = ['monthlyRent', 'propertyTax', 'hoaFee', 'mortgage', 'insurance', 'repairCost', 'mortgageInterest'];
+const YEAR_FIELDS = ['monthlyRent', 'propertyTax', 'hoaFee', 'mortgage', 'insurance', 'mortgageInterest'];
 
 // Joined view of one yearly record: `id` is the property_years id, `propertyId` the house.
 const SELECT_RECORD = `
   SELECT y.id, y.propertyId, y.year, ${PROPERTY_FIELDS.map((f) => 'p.' + f).join(', ')},
-         ${YEAR_FIELDS.map((f) => 'y.' + f).join(', ')}
+         ${YEAR_FIELDS.map((f) => 'y.' + f).join(', ')},
+         (SELECT SUM(r.amount) FROM repair_items r WHERE r.propertyYearId = y.id) AS repairCost
   FROM property_years y JOIN properties p ON p.id = y.propertyId`;
 
 let db = null;
+
+const isValidDate = (s) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  const dt = m && new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return Boolean(dt) && dt.getUTCMonth() === +m[2] - 1 && dt.getUTCDate() === +m[3];
+};
+
+// Normalize and check the itemized repair list. Date and amount are required per item.
+function cleanRepairItems(items) {
+  if (items === undefined || items === null) {
+    return [];
+  }
+  if (!Array.isArray(items)) {
+    throw new Error('Repair items must be a list.');
+  }
+  return items.map((item, i) => {
+    const n = i + 1;
+    const it = item || {};
+    const clean = {
+      date: typeof it.date === 'string' ? it.date.trim() : '',
+      amount: it.amount === '' || it.amount === null || it.amount === undefined ? NaN : Number(it.amount),
+      contractor: typeof it.contractor === 'string' ? it.contractor.trim() : '',
+      description: typeof it.description === 'string' ? it.description.trim() : ''
+    };
+    if (!isValidDate(clean.date)) {
+      throw new Error(`Repair item ${n}: date must be a valid date.`);
+    }
+    if (!Number.isFinite(clean.amount) || clean.amount < 0) {
+      throw new Error(`Repair item ${n}: amount must be a number, 0 or greater.`);
+    }
+    return clean;
+  });
+}
 
 function validate(data) {
   const d = data || {};
@@ -41,7 +75,7 @@ function validate(data) {
     hoaFee: num(d.hoaFee),              // per month (required)
     mortgage: num(d.mortgage),          // per month (required)
     insurance: optNum(d.insurance),     // per year (optional)
-    repairCost: optNum(d.repairCost),   // total repair spend (optional)
+    repairItems: cleanRepairItems(d.repairItems),   // itemized repairs (optional; total is derived)
     mortgageInterest: optNum(d.mortgageInterest) // per year (optional)
   };
 
@@ -73,7 +107,6 @@ function validate(data) {
   }
   for (const [field, label] of [
     ['insurance', 'Insurance'],
-    ['repairCost', 'Repair cost'],
     ['mortgageInterest', 'Mortgage interest']
   ]) {
     if (clean[field] !== null && (!Number.isFinite(clean[field]) || clean[field] < 0)) {
@@ -203,6 +236,9 @@ function init() {
     db.exec(`ALTER TABLE property_years ADD COLUMN mortgageInterest REAL
              CHECK (mortgageInterest IS NULL OR mortgageInterest >= 0)`);
   }
+  if (version < 8) {
+    migrateToV8();
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -292,6 +328,58 @@ function migrateToV5() {
   }
 }
 
+// v8: repair cost becomes a list of items (`repair_items`); the yearly repair cost is their
+// sum, so the stored `repairCost` column is dropped. An existing non-zero repairCost becomes
+// one item dated Jan 1 of its year.
+function migrateToV8() {
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE property_years_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        propertyId INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+        year INTEGER NOT NULL REFERENCES years(year) CHECK (year BETWEEN 1900 AND 2200),
+        monthlyRent REAL NOT NULL CHECK (monthlyRent >= 0),
+        propertyTax REAL NOT NULL CHECK (propertyTax >= 0),
+        hoaFee REAL NOT NULL CHECK (hoaFee >= 0),
+        mortgage REAL NOT NULL CHECK (mortgage >= 0),
+        insurance REAL CHECK (insurance IS NULL OR insurance >= 0),
+        mortgageInterest REAL CHECK (mortgageInterest IS NULL OR mortgageInterest >= 0)
+      );
+      INSERT INTO property_years_new
+        SELECT id, propertyId, year, monthlyRent, propertyTax, hoaFee, mortgage, insurance, mortgageInterest
+        FROM property_years;
+      CREATE TABLE repair_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        propertyYearId INTEGER NOT NULL REFERENCES property_years_new(id) ON DELETE CASCADE,
+        date TEXT NOT NULL,
+        amount REAL NOT NULL CHECK (amount >= 0),
+        contractor TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT ''
+      );
+      INSERT INTO repair_items (propertyYearId, date, amount, contractor, description)
+        SELECT id, printf('%04d-01-01', year), repairCost, '', 'Migrated repair cost'
+        FROM property_years WHERE repairCost IS NOT NULL AND repairCost > 0;
+      DROP TABLE property_years;
+      ALTER TABLE property_years_new RENAME TO property_years;
+      CREATE UNIQUE INDEX idx_property_years_unique ON property_years (propertyId, year);
+      CREATE INDEX idx_property_years_year ON property_years (year);
+      CREATE INDEX idx_property_years_property ON property_years (propertyId);
+      CREATE INDEX idx_repair_items_year ON repair_items (propertyYearId);
+    `);
+    if (db.prepare('PRAGMA foreign_key_check').all().length > 0) {
+      throw new Error('Migration v8 left foreign key violations.');
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
 function close() {
   if (db) {
     db.close();
@@ -365,11 +453,32 @@ function updateProperty(id, data) {
 
 function list(yearValue) {
   const year = validYear(yearValue);
-  return db.prepare(`${SELECT_RECORD} WHERE y.year = ? ORDER BY y.id`).all(year).map(toPlain);
+  return db.prepare(`${SELECT_RECORD} WHERE y.year = ? ORDER BY y.id`).all(year).map(withItems);
 }
 
 function get(id) {
-  return toPlain(db.prepare(`${SELECT_RECORD} WHERE y.id = ?`).get(id));
+  return withItems(db.prepare(`${SELECT_RECORD} WHERE y.id = ?`).get(id));
+}
+
+// A yearly record plus its itemized repairs (oldest first).
+function withItems(row) {
+  const repairItems = db.prepare(`
+    SELECT id, date, amount, contractor, description FROM repair_items
+    WHERE propertyYearId = ? ORDER BY date, id
+  `).all(row.id).map(toPlain);
+  return { ...row, repairItems };
+}
+
+// Replace a record's repair items with the given (already validated) list.
+function setRepairItems(yearRecordId, items) {
+  db.prepare('DELETE FROM repair_items WHERE propertyYearId = ?').run(yearRecordId);
+  const insert = db.prepare(`
+    INSERT INTO repair_items (propertyYearId, date, amount, contractor, description)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  for (const it of items) {
+    insert.run(yearRecordId, it.date, it.amount, it.contractor, it.description);
+  }
 }
 
 function pick(obj, fields) {
@@ -413,6 +522,7 @@ function add(yearValue, data) {
     const { lastInsertRowid } = db
       .prepare(`INSERT INTO property_years (${cols}) VALUES (${params})`)
       .run({ ...pick(clean, YEAR_FIELDS), propertyId, year });
+    setRepairItems(Number(lastInsertRowid), clean.repairItems);
     db.exec('COMMIT');
     return get(Number(lastInsertRowid));
   } catch (err) {
@@ -426,12 +536,21 @@ function add(yearValue, data) {
 function update(id, data) {
   // Placeholders stand in for the house fields so the shared validator checks the yearly ones.
   const house = { address: 'x', city: 'x', bedrooms: 0, bathrooms: 0, sqft: 0 };
-  const clean = pick(validate({ ...house, ...pick(data || {}, YEAR_FIELDS) }), YEAR_FIELDS);
+  const valid = validate({ ...house, ...pick(data || {}, [...YEAR_FIELDS, 'repairItems']) });
+  const clean = pick(valid, YEAR_FIELDS);
   if (!db.prepare('SELECT 1 FROM property_years WHERE id = ?').get(id)) {
     throw new Error('Property not found.');
   }
   const sets = YEAR_FIELDS.map((f) => `${f} = @${f}`).join(', ');
-  db.prepare(`UPDATE property_years SET ${sets} WHERE id = @id`).run({ ...clean, id });
+  db.exec('BEGIN');
+  try {
+    db.prepare(`UPDATE property_years SET ${sets} WHERE id = @id`).run({ ...clean, id });
+    setRepairItems(id, valid.repairItems);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
   return get(id);
 }
 
@@ -470,8 +589,8 @@ function copyFromYear(targetValue, sourceValue, ids) {
   // A house is "already there" if the target year has a record of the same propertyId.
   const existing = new Set(list(target).map((p) => p.propertyId));
   const insert = db.prepare(`
-    INSERT INTO property_years (propertyId, year, monthlyRent, propertyTax, hoaFee, mortgage, insurance, repairCost)
-    VALUES (@propertyId, @year, 0, 0, 0, 0, NULL, NULL)
+    INSERT INTO property_years (propertyId, year, monthlyRent, propertyTax, hoaFee, mortgage, insurance)
+    VALUES (@propertyId, @year, 0, 0, 0, 0, NULL)
   `);
   const wanted = new Set(ids.map(Number));
   let copied = 0;

@@ -108,3 +108,21 @@ main h2 { margin: 0 0 12px; font-size: 1.1rem; }
 .year-add label { margin-bottom: 0; }
 .year-add label, .year-switch { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; text-align: left; }
 .header-actions { display: flex; gap: 12px; align-items: end; margin-left: auto; margin-right: 12px; }
+
+/* Repair items card in the edit dialog */
+dialog:has(.repairs) { width: 640px; }
+.repairs { border: 1px solid #d5d9df; border-radius: 8px; margin: 0 0 12px; padding: 6px 10px 10px; }
+.repairs legend { font-weight: 600; color: #1f2733; padding: 0 6px; }
+.repair-scroll { max-height: 150px; overflow-y: auto; margin-bottom: 8px; }
+.repair-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.repair-table th {
+  position: sticky; top: 0; background: #fff;
+  text-align: left; font-weight: 600; color: #61697a; padding: 2px 3px;
+}
+.repair-table td { padding: 1px 3px; }
+.repair-table input { margin: 0; padding: 3px 5px; font-size: 0.78rem; min-width: 0; }
+.repair-table th:nth-child(1), .repair-table td:nth-child(1) { width: 118px; }
+.repair-table th:nth-child(2), .repair-table td:nth-child(2) { width: 84px; }
+.repair-table th:nth-child(5), .repair-table td:nth-child(5) { width: 24px; }
+button.link { background: none; border: none; padding: 0; font: inherit; font-weight: inherit; color: inherit; cursor: pointer; }
+.repair-table th button.link:hover { color: #1f2733; text-decoration: underline; }
