@@ -6,12 +6,6 @@ export default function PropertyRow({ property: p, onEdit, onDelete }) {
     <tr>
       <td>{p.propertyId}</td>
       <td>{p.address}</td>
-      <td>{p.city}</td>
-      <td>{p.state}</td>
-      <td>{p.zip}</td>
-      <td className="num">{p.bedrooms}</td>
-      <td className="num">{p.bathrooms}</td>
-      <td className="num">{p.sqft.toLocaleString()}</td>
       {MONEY_COLUMNS.map((col) => (
         <td key={col.field} className="num">
           {col.optional ? optMoney(p[col.field]) : money.format(p[col.field])}

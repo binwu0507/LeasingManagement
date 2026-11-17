@@ -4,11 +4,13 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 7;
 // Describe the house itself; stored once in `properties`.
-const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft'];
+const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
+// House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
+const V5_PROPERTY_FIELDS = PROPERTY_FIELDS.filter((f) => f !== 'purchaseDate');
 // Vary by year; stored per year in `property_years`.
-const YEAR_FIELDS = ['monthlyRent', 'propertyTax', 'hoaFee', 'mortgage', 'insurance', 'repairCost'];
+const YEAR_FIELDS = ['monthlyRent', 'propertyTax', 'hoaFee', 'mortgage', 'insurance', 'repairCost', 'mortgageInterest'];
 
 // Joined view of one yearly record: `id` is the property_years id, `propertyId` the house.
 const SELECT_RECORD = `
@@ -33,12 +35,14 @@ function validate(data) {
     bedrooms: num(d.bedrooms),
     bathrooms: num(d.bathrooms),
     sqft: num(d.sqft),
+    purchaseDate: text(d.purchaseDate) || null,   // YYYY-MM-DD (optional)
     monthlyRent: num(d.monthlyRent),
     propertyTax: num(d.propertyTax),    // per year (required)
     hoaFee: num(d.hoaFee),              // per month (required)
     mortgage: num(d.mortgage),          // per month (required)
     insurance: optNum(d.insurance),     // per year (optional)
-    repairCost: optNum(d.repairCost)    // total repair spend (optional)
+    repairCost: optNum(d.repairCost),   // total repair spend (optional)
+    mortgageInterest: optNum(d.mortgageInterest) // per year (optional)
   };
 
   if (!clean.address) {
@@ -46,6 +50,13 @@ function validate(data) {
   }
   if (!clean.city) {
     throw new Error('City is required.');
+  }
+  if (clean.purchaseDate !== null) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(clean.purchaseDate);
+    const dt = m && new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    if (!dt || dt.getUTCMonth() !== +m[2] - 1 || dt.getUTCDate() !== +m[3]) {
+      throw new Error('Purchase date must be a valid date (or left blank).');
+    }
   }
   for (const [field, label] of [
     ['bedrooms', 'Bedrooms'],
@@ -62,7 +73,8 @@ function validate(data) {
   }
   for (const [field, label] of [
     ['insurance', 'Insurance'],
-    ['repairCost', 'Repair cost']
+    ['repairCost', 'Repair cost'],
+    ['mortgageInterest', 'Mortgage interest']
   ]) {
     if (clean[field] !== null && (!Number.isFinite(clean[field]) || clean[field] < 0)) {
       throw new Error(`${label} must be a number, 0 or greater (or left blank).`);
@@ -184,6 +196,13 @@ function init() {
   if (version < 5) {
     migrateToV5();
   }
+  if (version < 6) {
+    db.exec('ALTER TABLE properties ADD COLUMN purchaseDate TEXT');
+  }
+  if (version < 7) {
+    db.exec(`ALTER TABLE property_years ADD COLUMN mortgageInterest REAL
+             CHECK (mortgageInterest IS NULL OR mortgageInterest >= 0)`);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -208,7 +227,7 @@ function migrateToV5() {
       const all = ids.split(',').map(Number).sort((a, b) => a - b);
       const keep = all[0];
       const newest = db.prepare('SELECT * FROM properties WHERE id = ?').get(all[all.length - 1]);
-      setPropertyFields(keep, newest);
+      setPropertyFields(keep, newest, V5_PROPERTY_FIELDS);
       for (const id of all.slice(1)) {
         db.prepare('UPDATE property_years SET propertyId = ? WHERE propertyId = ?').run(keep, id);
         db.prepare('DELETE FROM properties WHERE id = ?').run(id);
@@ -300,17 +319,48 @@ function addYear(value) {
   return year;
 }
 
-// Houses only (no yearly figures), with the years each one has a record for.
+const SELECT_HOUSE = `SELECT id, ${PROPERTY_FIELDS.join(', ')} FROM properties`;
+
+// Houses only (no yearly figures).
 function listProperties() {
+  return db.prepare(`${SELECT_HOUSE} ORDER BY lower(address), id`).all().map(toPlain);
+}
+
+// Validate only the house fields; any yearly data in `data` is ignored (placeholders
+// stand in so the shared validator doesn't reject the missing/blank yearly values).
+function validateHouse(data) {
+  const placeholders = { monthlyRent: 0, propertyTax: 0, hoaFee: 0, mortgage: 0 };
+  return pick(validate({ ...pick(data || {}, PROPERTY_FIELDS), ...placeholders }), PROPERTY_FIELDS);
+}
+
+function houseClash(clean, exceptId) {
   return db.prepare(`
-    SELECT p.id, ${PROPERTY_FIELDS.map((f) => 'p.' + f).join(', ')},
-           (SELECT group_concat(year) FROM (
-              SELECT year FROM property_years WHERE propertyId = p.id ORDER BY year DESC)) AS yearList
-    FROM properties p ORDER BY lower(p.address), p.id
-  `).all().map((r) => ({
-    ...r,
-    years: r.yearList ? r.yearList.split(',').map(Number) : []
-  }));
+    SELECT 1 FROM properties
+    WHERE id != ? AND lower(address) = lower(?) AND lower(city) = lower(?) AND lower(COALESCE(zip, '')) = lower(?)
+  `).get(exceptId, clean.address, clean.city, clean.zip);
+}
+
+function addProperty(data) {
+  const clean = validateHouse(data);
+  if (houseClash(clean, -1)) {
+    throw new Error('A property with that address, city and zip already exists.');
+  }
+  const cols = PROPERTY_FIELDS.join(', ');
+  const params = PROPERTY_FIELDS.map((f) => '@' + f).join(', ');
+  const { lastInsertRowid } = db.prepare(`INSERT INTO properties (${cols}) VALUES (${params})`).run(clean);
+  return toPlain(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(Number(lastInsertRowid)));
+}
+
+function updateProperty(id, data) {
+  const clean = validateHouse(data);
+  if (!db.prepare('SELECT 1 FROM properties WHERE id = ?').get(id)) {
+    throw new Error('Property not found.');
+  }
+  if (houseClash(clean, id)) {
+    throw new Error('Another property already has that address, city and zip.');
+  }
+  setPropertyFields(id, clean);
+  return toPlain(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(id));
 }
 
 function list(yearValue) {
@@ -326,9 +376,9 @@ function pick(obj, fields) {
   return Object.fromEntries(fields.map((f) => [f, obj[f]]));
 }
 
-function setPropertyFields(propertyId, clean) {
-  const sets = PROPERTY_FIELDS.map((f) => `${f} = @${f}`).join(', ');
-  db.prepare(`UPDATE properties SET ${sets} WHERE id = @id`).run({ ...pick(clean, PROPERTY_FIELDS), id: propertyId });
+function setPropertyFields(propertyId, clean, fields = PROPERTY_FIELDS) {
+  const sets = fields.map((f) => `${f} = @${f}`).join(', ');
+  db.prepare(`UPDATE properties SET ${sets} WHERE id = @id`).run({ ...pick(clean, fields), id: propertyId });
 }
 
 function add(yearValue, data) {
@@ -371,30 +421,17 @@ function add(yearValue, data) {
   }
 }
 
-// The year of an existing record never changes. House details apply to every year.
+// Updates only the yearly figures of a record; the year and the house itself never change
+// here (house details are edited from the home page).
 function update(id, data) {
-  const clean = validate(data);
-  const record = db.prepare('SELECT propertyId FROM property_years WHERE id = ?').get(id);
-  if (!record) {
+  // Placeholders stand in for the house fields so the shared validator checks the yearly ones.
+  const house = { address: 'x', city: 'x', bedrooms: 0, bathrooms: 0, sqft: 0 };
+  const clean = pick(validate({ ...house, ...pick(data || {}, YEAR_FIELDS) }), YEAR_FIELDS);
+  if (!db.prepare('SELECT 1 FROM property_years WHERE id = ?').get(id)) {
     throw new Error('Property not found.');
   }
   const sets = YEAR_FIELDS.map((f) => `${f} = @${f}`).join(', ');
-  const clash = db.prepare(`
-    SELECT 1 FROM properties
-    WHERE id != ? AND lower(address) = lower(?) AND lower(city) = lower(?) AND lower(COALESCE(zip, '')) = lower(?)
-  `).get(record.propertyId, clean.address, clean.city, clean.zip);
-  if (clash) {
-    throw new Error('Another property already has that address, city and zip.');
-  }
-  db.exec('BEGIN');
-  try {
-    setPropertyFields(record.propertyId, clean);
-    db.prepare(`UPDATE property_years SET ${sets} WHERE id = @id`).run({ ...pick(clean, YEAR_FIELDS), id });
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
+  db.prepare(`UPDATE property_years SET ${sets} WHERE id = @id`).run({ ...clean, id });
   return get(id);
 }
 
@@ -457,4 +494,4 @@ function copyFromYear(targetValue, sourceValue, ids) {
   return copied;
 }
 
-module.exports = { init, close, listYears, addYear, listProperties, list, add, update, remove, copyFromYear };
+module.exports = { init, close, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };

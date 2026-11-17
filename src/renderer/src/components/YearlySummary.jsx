@@ -12,7 +12,7 @@ export default function YearlySummary({ properties }) {
       <dl>
         <dt>Yearly rent income</dt>
         <dd>{money.format(rentIncome)}</dd>
-        <dt>Yearly expenses (mortgage, HOA, tax, insurance, repairs)</dt>
+        <dt>Yearly expenses (mortgage interest, HOA, tax, insurance, repairs)</dt>
         <dd>{money.format(-expenses)}</dd>
         <dt className="net">Net income (yearly)</dt>
         <dd className={`net ${net < 0 ? 'loss' : 'gain'}`}>{money.format(net)}</dd>

@@ -6,7 +6,9 @@ contextBridge.exposeInMainWorld('api', {
     add: (year) => ipcRenderer.invoke('years:add', year)
   },
   properties: {
-    listAll: () => ipcRenderer.invoke('properties:listAll'),
+    addHouse: (data) => ipcRenderer.invoke('houses:add', data),
+    updateHouse: (id, data) => ipcRenderer.invoke('houses:update', id, data),
+    listAll:() => ipcRenderer.invoke('properties:listAll'),
     list: (year) => ipcRenderer.invoke('properties:list', year),
     add: (year, data) => ipcRenderer.invoke('properties:add', year, data),
     update: (id, data) => ipcRenderer.invoke('properties:update', id, data),

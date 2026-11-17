@@ -7,15 +7,17 @@ export const optMoney = (v) => (v === null || v === undefined ? '—' : money.fo
 
 export const sum = (list, field) => list.reduce((total, p) => total + (p[field] || 0), 0);
 
-// Yearly net income for one property: rent minus all costs
+// Yearly net income for one property: rent minus all costs.
+// Uses annual mortgage interest (not the mortgage payment).
 export const netIncome = (p) =>
-  (p.monthlyRent - p.mortgage - p.hoaFee) * 12 -
-  (p.propertyTax || 0) - (p.insurance || 0) - (p.repairCost || 0);
+  (p.monthlyRent - p.hoaFee) * 12 -
+  (p.mortgageInterest || 0) - (p.propertyTax || 0) - (p.insurance || 0) - (p.repairCost || 0);
 
 // Columns in the table. `monthly` columns are multiplied by 12 in the annual totals row.
 export const MONEY_COLUMNS = [
   { field: 'monthlyRent', header: 'Rent / mo', monthly: true },
   { field: 'mortgage', header: 'Mortgage / mo', monthly: true },
+  { field: 'mortgageInterest', header: 'Mortgage Interest / yr', optional: true },
   { field: 'hoaFee', header: 'HOA / mo', monthly: true },
   { field: 'propertyTax', header: 'Tax / yr' },
   { field: 'insurance', header: 'Insurance / yr', optional: true },
@@ -34,7 +36,7 @@ export function annualTotals(properties) {
 export function yearlySummary(properties) {
   const rentIncome = sum(properties, 'monthlyRent') * 12;
   const expenses =
-    sum(properties, 'mortgage') * 12 +
+    sum(properties, 'mortgageInterest') +
     sum(properties, 'hoaFee') * 12 +
     sum(properties, 'propertyTax') +
     sum(properties, 'insurance') +

@@ -4,8 +4,8 @@ const store = require('./store');
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1100,
-    height: 700,
+    width: 1800,
+    height:1000,
     webPreferences: {
       // electron-vite builds main, preload and renderer into out/<name>/
       preload: path.join(__dirname, '../preload/index.js'),
@@ -34,6 +34,8 @@ function respond(action) {
 ipcMain.handle('years:list', () => respond(() => store.listYears()));
 ipcMain.handle('years:add', (event, year) => respond(() => store.addYear(year)));
 ipcMain.handle('properties:listAll', () => respond(() => store.listProperties()));
+ipcMain.handle('houses:add', (event, data) => respond(() => store.addProperty(data)));
+ipcMain.handle('houses:update', (event, id, data) => respond(() => store.updateProperty(id, data)));
 ipcMain.handle('properties:list', (event, year) => respond(() => store.list(year)));
 ipcMain.handle('properties:add', (event, year, data) => respond(() => store.add(year, data)));
 ipcMain.handle('properties:update', (event, id, data) => respond(() => store.update(id, data)));

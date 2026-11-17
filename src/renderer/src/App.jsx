@@ -13,6 +13,8 @@ export default function App() {
   // undefined = dialog closed, null = adding, object = editing that house
   const [editing, setEditing] = useState(undefined);
   const [copying, setCopying] = useState(false);
+  // Home page dialog: undefined = closed, null = adding, object = editing that house
+  const [editingHouse, setEditingHouse] = useState(undefined);
 
   // The main process owns the data; reload the full list after every change
   const refresh = useCallback(async () => {
@@ -95,8 +97,42 @@ export default function App() {
     }
   }
 
+  async function saveHouse(values) {
+    // Property-level fields only; yearly data is never sent from the home page
+    const house = Object.fromEntries(
+      ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'].map((f) => [f, values[f]])
+    );
+    const res = editingHouse
+      ? await window.api.properties.updateHouse(editingHouse.id, house)
+      : await window.api.properties.addHouse(house);
+    if (!res.ok) {
+      return res.error;
+    }
+    setEditingHouse(undefined);
+    loadAll();
+  }
+
   if (year === null) {
-    return <YearSelect years={years} properties={allProperties} onSelect={setYear} onAddYear={addYear} />;
+    return (
+      <>
+        <YearSelect
+          years={years}
+          properties={allProperties}
+          onSelect={setYear}
+          onAddYear={addYear}
+          onEdit={setEditingHouse}
+        />
+        {editingHouse !== undefined && (
+          <PropertyForm
+            key={editingHouse ? editingHouse.id : 'new'}
+            houseOnly
+            property={editingHouse}
+            onSave={saveHouse}
+            onCancel={() => setEditingHouse(undefined)}
+          />
+        )}
+      </>
+    );
   }
 
   return (

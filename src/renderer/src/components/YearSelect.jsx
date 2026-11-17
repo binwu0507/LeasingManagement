@@ -5,7 +5,7 @@ import { useState } from 'react';
  * that opens the property list for the chosen year.
  * `onAddYear` returns an error message, or nothing on success.
  */
-export default function YearSelect({ years, properties, onSelect, onAddYear }) {
+export default function YearSelect({ years, properties, onSelect, onAddYear, onEdit }) {
   const [newYear, setNewYear] = useState(String(new Date().getFullYear()));
   const [error, setError] = useState('');
 
@@ -50,9 +50,12 @@ export default function YearSelect({ years, properties, onSelect, onAddYear }) {
 
       <main>
         {error && <p className="error">{error}</p>}
-        <h2>Properties</h2>
+        <div className="section-head">
+          <h2>Properties</h2>
+          <button className="primary" onClick={() => onEdit(null)}>+ Add Property</button>
+        </div>
         {properties.length === 0 ? (
-          <p id="empty-msg">No properties yet. Select or add a year, then add a house.</p>
+          <p id="empty-msg">No properties yet. Click "Add Property" to create one.</p>
         ) : (
           <table>
             <thead>
@@ -64,7 +67,8 @@ export default function YearSelect({ years, properties, onSelect, onAddYear }) {
                 <th className="num">Beds</th>
                 <th className="num">Baths</th>
                 <th className="num">Sq ft</th>
-                <th>Years</th>
+                <th>Purchase Date</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -77,10 +81,9 @@ export default function YearSelect({ years, properties, onSelect, onAddYear }) {
                   <td className="num">{p.bedrooms}</td>
                   <td className="num">{p.bathrooms}</td>
                   <td className="num">{p.sqft}</td>
-                  <td>
-                    {p.years.map((y) => (
-                      <button key={y} className="year-chip" onClick={() => onSelect(y)}>{y}</button>
-                    ))}
+                  <td>{p.purchaseDate}</td>
+                  <td className="row-actions">
+                    <button onClick={() => onEdit(p)}>Edit</button>
                   </td>
                 </tr>
               ))}
