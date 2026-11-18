@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { money as formatMoney } from '../finance.js';
-import TenantPicker from './TenantPicker.jsx';
-import TenantDialog from './TenantDialog.jsx';
 import LeaseDialog from './LeaseDialog.jsx';
 import { toast } from '../toast.js';
 
@@ -109,7 +107,6 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
   const [leases, setLeases] = useState([]); // stored leases of this property (saved independently)
   // { mode: 'add' | 'renew' | 'edit', lease } while the lease dialog is open
   const [leaseDialog, setLeaseDialog] = useState(null);
-  const [addingTenantFor, setAddingTenantFor] = useState(null); // lease id while the Add Tenant dialog is open
   const [sort, setSort] = useState(null); // { key: 'date' | 'amount', dir: 1 | -1 }; last header click
   const propertyId = property ? property.id : null;
   // Property editing only: Save is enabled once a property field differs from what was loaded.
@@ -179,18 +176,18 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
     toast(leaseId === undefined ? 'Lease added.' : 'Lease saved.');
     return undefined;
   };
-  const changeTenants = async (l, list) => {
-    const err = await persistLease({ ...l, tenants: list }, l.id);
-    setError(err || '');
-  };
-  // A newly created tenant is saved with its lease straight away, ticked as occupying.
-  const tenantAdded = async (tenant) => {
-    setTenants((all) => [...all, tenant]);
-    toast('Tenant added.');
-    const l = leases.find((x) => x.id === addingTenantFor);
-    setAddingTenantFor(null);
-    if (l) {
-      await changeTenants(l, [...l.tenants, { tenantId: tenant.id, occupying: true }]);
+  // Names of the tenants occupying a lease, comma-separated.
+  const occupyingNames = (l) => l.tenants
+    .filter((t) => t.occupying)
+    .map((t) => tenants.find((x) => x.id === t.tenantId))
+    .filter(Boolean)
+    .map((t) => `${t.firstName} ${t.lastName}`)
+    .join(', ');
+  // The lease dialog created a tenant (or confirmed an existing one); remember new people for names.
+  const tenantCreated = (tenant) => {
+    if (!tenants.some((t) => t.id === tenant.id)) {
+      setTenants((all) => [...all, tenant]);
+      toast('Tenant added.');
     }
   };
   // Adds a follow-on lease: starts the day after this one ends, runs one year, same rent and
@@ -293,9 +290,7 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
                         <td>{formatMoney.format(l.monthlyRent)}</td>
                         <td>{l.moveInDate || '—'}</td>
                         <td>{l.moveOutDate || '—'}</td>
-                        <td><TenantPicker value={l.tenants} tenants={tenants}
-                          onChange={(list) => changeTenants(l, list)}
-                          onAdd={() => setAddingTenantFor(l.id)} /></td>
+                        <td>{occupyingNames(l) || '—'}</td>
                         <td>
                           {canRenew(l, leases) && (
                             <button type="button" className="renew" onClick={() => setLeaseDialog({ mode: 'renew', lease: renewalFor(l) })}
@@ -380,19 +375,17 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
         <LeaseDialog
           title={{ add: 'Add Lease', renew: 'Renew Lease', edit: 'Edit Lease' }[leaseDialog.mode]}
           hint={{
-            add: 'Fill in the lease, then confirm to save it. Tenants can be added from the lease table afterwards.',
+            add: 'Fill in the lease and add its tenants, then confirm to save it.',
             renew: 'Review or edit the new lease, then confirm to save it.',
             edit: 'Change the lease, then confirm to save it.'
           }[leaseDialog.mode]}
           lease={leaseDialog.lease}
           tenants={tenants}
           applyChange={applyLeaseChange}
+          onTenantCreated={tenantCreated}
           onConfirm={confirmLease}
           onCancel={() => setLeaseDialog(null)}
         />
-      )}
-      {addingTenantFor !== null && (
-        <TenantDialog onAdded={tenantAdded} onCancel={() => setAddingTenantFor(null)} />
       )}
     </dialog>
   );

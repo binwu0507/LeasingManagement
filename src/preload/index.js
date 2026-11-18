@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   tenants: {
     list: () => ipcRenderer.invoke('tenants:list'),
+    findMatches: (data) => ipcRenderer.invoke('tenants:matches', data),
     add: (data) => ipcRenderer.invoke('tenants:add', data)
   },
   properties: {

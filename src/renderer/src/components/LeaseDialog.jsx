@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import TenantDialog from './TenantDialog.jsx';
 
 /**
  * Lease dialog (add or renew): the new lease (pre-populated or blank) can be edited, then confirmed or cancelled.
@@ -7,10 +8,11 @@ import { createPortal } from 'react-dom';
  * start/end/move-in/move-out dates in step). `tenants` are all tenant records, for names.
  * Rendered in a portal so its buttons don't submit the property form.
  */
-export default function LeaseDialog({ title, hint, lease, tenants, applyChange, onConfirm, onCancel }) {
+export default function LeaseDialog({ title, hint, lease, tenants, applyChange, onTenantCreated, onConfirm, onCancel }) {
   const dialogRef = useRef(null);
   const [draft, setDraft] = useState(lease);
   const [error, setError] = useState('');
+  const [addingTenant, setAddingTenant] = useState(false);
 
   useEffect(() => {
     if (!dialogRef.current.open) {
@@ -23,6 +25,16 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
     ...d,
     tenants: d.tenants.map((t) => (t.tenantId === tenantId ? { ...t, occupying: !t.occupying } : t))
   }));
+
+  // The tenant (new, or an existing person the user confirmed) is linked to this lease, occupying.
+  const tenantAdded = (tenant) => {
+    onTenantCreated(tenant);
+    setAddingTenant(false);
+    setDraft((d) => ({
+      ...d,
+      tenants: [...d.tenants.filter((t) => t.tenantId !== tenant.id), { tenantId: tenant.id, occupying: true }]
+    }));
+  };
 
   async function confirm(e) {
     e.preventDefault();
@@ -64,26 +76,29 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
           {field('Move in', 'moveInDate', { type: 'date' })}
           {field('Move out', 'moveOutDate', { type: 'date' })}
         </div>
-        {draft.tenants.length > 0 && (
-          <fieldset className="renew-tenants">
-            <legend>Tenants (tick those occupying)</legend>
-            {draft.tenants.map((t) => {
-              const info = tenants.find((x) => x.id === t.tenantId);
-              return info && (
-                <label key={t.tenantId}>
-                  <input type="checkbox" checked={t.occupying} onChange={() => toggleTenant(t.tenantId)} />
-                  {info.firstName} {info.lastName}
-                </label>
-              );
-            })}
-          </fieldset>
-        )}
+        <fieldset className="renew-tenants">
+          <legend>Tenants (tick those occupying)</legend>
+          {draft.tenants.length === 0 && <p className="hint">No tenants on this lease yet.</p>}
+          {draft.tenants.map((t) => {
+            const info = tenants.find((x) => x.id === t.tenantId);
+            return info && (
+              <label key={t.tenantId}>
+                <input type="checkbox" checked={t.occupying} onChange={() => toggleTenant(t.tenantId)} />
+                {info.firstName} {info.lastName} <span className="hint">(···{info.ssn.slice(-4)})</span>
+              </label>
+            );
+          })}
+          <button type="button" onClick={() => setAddingTenant(true)}>+ Add tenant</button>
+        </fieldset>
         {error && <p className="error">{error}</p>}
         <div className="actions">
           <button type="button" onClick={onCancel}>Cancel</button>
           <button type="submit" className="primary">Confirm</button>
         </div>
       </form>
+      {addingTenant && (
+        <TenantDialog onAdded={tenantAdded} onCancel={() => setAddingTenant(false)} />
+      )}
     </dialog>,
     document.body
   );

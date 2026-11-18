@@ -393,6 +393,33 @@ function listTenants() {
     .all().map(toPlain);
 }
 
+// Existing tenants sharing the given SSN, phone or email (formatting ignored), each with the
+// list of fields that matched. Used to ask whether a new tenant is really an existing person.
+function findTenantMatches(data) {
+  const d = data || {};
+  const digits = (v) => (typeof v === 'string' ? v.replace(/\D/g, '') : '');
+  const ssn = digits(d.ssn);
+  const phone = digits(d.phone);
+  const email = typeof d.email === 'string' ? d.email.trim().toLowerCase() : '';
+  const matches = [];
+  for (const t of listTenants()) {
+    const matchedOn = [];
+    if (ssn.length === 9 && digits(t.ssn) === ssn) {
+      matchedOn.push('SSN');
+    }
+    if (phone.length === 10 && digits(t.phone) === phone) {
+      matchedOn.push('phone');
+    }
+    if (email && t.email && t.email.toLowerCase() === email) {
+      matchedOn.push('email');
+    }
+    if (matchedOn.length) {
+      matches.push({ ...t, matchedOn });
+    }
+  }
+  return matches;
+}
+
 function addTenant(data) {
   const clean = validateTenant(data);
   if (db.prepare('SELECT 1 FROM tenants WHERE ssn = ?').get(clean.ssn)) {
@@ -850,4 +877,4 @@ function copyFromYear(targetValue, sourceValue, ids) {
   return copied;
 }
 
-module.exports = { init, close, listLeases, addLease, updateLease, deleteLease, listTenants, addTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+module.exports = { init, close, listLeases, addLease, updateLease, deleteLease, listTenants, findTenantMatches, addTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };

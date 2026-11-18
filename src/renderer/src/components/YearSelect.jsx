@@ -6,7 +6,7 @@ import MapDialog from './MapDialog.jsx';
  * that opens the property list for the chosen year.
  * `onAddYear` returns an error message, or nothing on success.
  */
-export default function YearSelect({ years, properties, onSelect, onAddYear, onEdit }) {
+export default function YearSelect({ years, properties, onSelect, onAddYear, onEdit, onShowTenants }) {
   const [newYear, setNewYear] = useState(String(new Date().getFullYear()));
   const [error, setError] = useState('');
   const [mapFor, setMapFor] = useState(null); // property whose map is open
@@ -21,6 +21,7 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
     <>
       <header>
         <h1>Leasing Management</h1>
+        <button type="button" className="link nav-link" onClick={onShowTenants}>Tenants</button>
         <div className="header-actions">
           <label className="year-switch">
             View year

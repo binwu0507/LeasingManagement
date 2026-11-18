@@ -5,6 +5,7 @@ import YearlySummary from './components/YearlySummary.jsx';
 import CopyFromYear from './components/CopyFromYear.jsx';
 import YearSelect from './components/YearSelect.jsx';
 import Toaster from './components/Toaster.jsx';
+import TenantsPage from './components/TenantsPage.jsx';
 import { toast } from './toast.js';
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
   // undefined = dialog closed, null = adding, object = editing that house
   const [editing, setEditing] = useState(undefined);
   const [copying, setCopying] = useState(false);
+  const [showTenants, setShowTenants] = useState(false); // home page link: the all-tenants page
   // Home page dialog: undefined = closed, null = adding, object = editing that house
   const [editingHouse, setEditingHouse] = useState(undefined);
 
@@ -116,11 +118,16 @@ export default function App() {
     toast('Property saved.');
   }
 
+  if (year === null && showTenants) {
+    return <TenantsPage onBack={() => setShowTenants(false)} />;
+  }
+
   if (year === null) {
     return (
       <>
         <Toaster />
         <YearSelect
+          onShowTenants={() => setShowTenants(true)}
           years={years}
           properties={allProperties}
           onSelect={setYear}

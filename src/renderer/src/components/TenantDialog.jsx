@@ -25,6 +25,7 @@ export default function TenantDialog({ onAdded, onCancel }) {
   const dialogRef = useRef(null);
   const [values, setValues] = useState(EMPTY);
   const [error, setError] = useState('');
+  const [matches, setMatches] = useState(null); // existing tenants matching the entered SSN/phone/email
 
   useEffect(() => {
     if (!dialogRef.current.open) {
@@ -38,16 +39,30 @@ export default function TenantDialog({ onAdded, onCancel }) {
     setValues((v) => ({ ...v, [name]: masked }));
   };
 
-  async function submit(e) {
-    e.preventDefault();
-    e.stopPropagation(); // don't let the submit reach the property form (React bubbles through portals)
+  async function create() {
     const res = await window.api.tenants.add(values);
     if (!res.ok) {
+      setMatches(null);
       setError(res.error);
       return;
     }
     onAdded(res.data);
   }
+
+  async function submit(e) {
+    e.preventDefault();
+    e.stopPropagation(); // don't let the submit reach the property form (React bubbles through portals)
+    // If the SSN, phone or email belongs to an existing tenant, ask before adding anyone new.
+    const found = await window.api.tenants.findMatches(values);
+    if (found.ok && found.data.length > 0) {
+      setError('');
+      setMatches(found.data);
+      return;
+    }
+    await create();
+  }
+
+  const ssnTaken = matches?.some((m) => m.matchedOn.includes('SSN'));
 
   const field = (label, name, props = {}) => (
     <label>
@@ -58,6 +73,35 @@ export default function TenantDialog({ onAdded, onCancel }) {
 
   return createPortal(
     <dialog ref={dialogRef} onCancel={onCancel} onClick={(e) => e.stopPropagation()}>
+      {matches ? (
+        <div>
+          <h2>Existing tenant?</h2>
+          <p>
+            The {[...new Set(matches.flatMap((m) => m.matchedOn))].join(', ')} you entered matches
+            {matches.length > 1 ? ' these tenants' : ' this tenant'} already in the database.
+            Are you adding an existing person?
+          </p>
+          <ul className="tenant-matches">
+            {matches.map((m) => (
+              <li key={m.id}>
+                <div>
+                  <strong>{m.firstName} {m.lastName}</strong> <span className="hint">(···{m.ssn.slice(-4)})</span>
+                  <div className="hint">
+                    {[m.phone, m.email].filter(Boolean).join(' · ') || 'No phone or email'} — matches on {m.matchedOn.join(', ')}
+                  </div>
+                </div>
+                <button type="button" className="primary" onClick={() => onAdded(m)}>Yes, use this person</button>
+              </li>
+            ))}
+          </ul>
+          {ssnTaken && <p className="hint">The SSN is already in use, so it can't be added as a new person.</p>}
+          {error && <p className="error">{error}</p>}
+          <div className="actions">
+            <button type="button" onClick={() => setMatches(null)}>Back</button>
+            <button type="button" onClick={create} disabled={ssnTaken}>No, add as a new person</button>
+          </div>
+        </div>
+      ) : (
       <form onSubmit={submit} noValidate>
         <h2>Add Tenant</h2>
         <div className="row">
@@ -93,6 +137,7 @@ export default function TenantDialog({ onAdded, onCancel }) {
           <button type="submit" className="primary">Save tenant</button>
         </div>
       </form>
+      )}
     </dialog>,
     document.body
   );
