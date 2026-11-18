@@ -4,7 +4,7 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 11;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
@@ -49,6 +49,65 @@ function cleanRepairItems(items) {
     }
     if (!Number.isFinite(clean.amount) || clean.amount < 0) {
       throw new Error(`Repair item ${n}: amount must be a number, 0 or greater.`);
+    }
+    return clean;
+  });
+}
+
+// Normalize and check a property's leasing contracts. Start/end dates and rent are required;
+// move-in/move-out dates and tenant names are optional.
+function cleanLeases(leases) {
+  if (leases === undefined || leases === null) {
+    return [];
+  }
+  if (!Array.isArray(leases)) {
+    throw new Error('Leases must be a list.');
+  }
+  return leases.map((item, i) => {
+    const n = i + 1;
+    const it = item || {};
+    const text = (v) => (typeof v === 'string' ? v.trim() : '');
+    const clean = {
+      startDate: text(it.startDate),
+      endDate: text(it.endDate),
+      monthlyRent: it.monthlyRent === '' || it.monthlyRent === null || it.monthlyRent === undefined
+        ? NaN : Number(it.monthlyRent),
+      moveInDate: text(it.moveInDate) || null,
+      moveOutDate: text(it.moveOutDate) || null,
+      // Tenants linked to this lease; `occupying` says whether they live in the house under it.
+      tenants: []
+    };
+    const seen = new Set();
+    for (const t of Array.isArray(it.tenants) ? it.tenants : []) {
+      const tenantId = Number((t || {}).tenantId);
+      if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        throw new Error(`Lease ${n}: invalid tenant.`);
+      }
+      if (!seen.has(tenantId)) {
+        seen.add(tenantId);
+        clean.tenants.push({ tenantId, occupying: Boolean(t.occupying) });
+      }
+    }
+    if (!isValidDate(clean.startDate)) {
+      throw new Error(`Lease ${n}: start date must be a valid date.`);
+    }
+    if (!isValidDate(clean.endDate)) {
+      throw new Error(`Lease ${n}: end date must be a valid date.`);
+    }
+    if (clean.endDate < clean.startDate) {
+      throw new Error(`Lease ${n}: end date cannot be before the start date.`);
+    }
+    if (!Number.isFinite(clean.monthlyRent) || clean.monthlyRent < 0) {
+      throw new Error(`Lease ${n}: monthly rent must be a number, 0 or greater.`);
+    }
+    if (clean.moveInDate !== null && !isValidDate(clean.moveInDate)) {
+      throw new Error(`Lease ${n}: move-in date must be a valid date (or left blank).`);
+    }
+    if (clean.moveOutDate !== null && !isValidDate(clean.moveOutDate)) {
+      throw new Error(`Lease ${n}: move-out date must be a valid date (or left blank).`);
+    }
+    if (clean.moveInDate && clean.moveOutDate && clean.moveOutDate < clean.moveInDate) {
+      throw new Error(`Lease ${n}: move-out date cannot be before the move-in date.`);
     }
     return clean;
   });
@@ -239,7 +298,103 @@ function init() {
   if (version < 8) {
     migrateToV8();
   }
+  if (version < 9) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS leases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        propertyId INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+        startDate TEXT NOT NULL,
+        endDate TEXT NOT NULL,
+        monthlyRent REAL NOT NULL CHECK (monthlyRent >= 0),
+        moveInDate TEXT,
+        moveOutDate TEXT,
+        tenantNames TEXT NOT NULL DEFAULT ''
+      );
+      CREATE INDEX IF NOT EXISTS idx_leases_property ON leases (propertyId);
+    `);
+  }
+  if (version < 10) {
+    // Tenants are people (unique by SSN) linked to leases. The old free-text
+    // leases.tenantNames column is left in place but no longer used.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tenants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        firstName TEXT NOT NULL CHECK (length(trim(firstName)) > 0),
+        lastName TEXT NOT NULL CHECK (length(trim(lastName)) > 0),
+        gender TEXT,
+        ssn TEXT NOT NULL UNIQUE,
+        dateOfBirth TEXT,
+        phone TEXT,
+        email TEXT
+      );
+      CREATE TABLE IF NOT EXISTS lease_tenants (
+        leaseId INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+        tenantId INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        PRIMARY KEY (leaseId, tenantId)
+      );
+      CREATE INDEX IF NOT EXISTS idx_lease_tenants_tenant ON lease_tenants (tenantId);
+    `);
+  }
+  if (version < 11) {
+    // A tenant stays linked to the lease; `occupying` marks whether they live in the house under it.
+    db.exec(`ALTER TABLE lease_tenants ADD COLUMN occupying INTEGER NOT NULL DEFAULT 1
+             CHECK (occupying IN (0, 1))`);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+const TENANT_FIELDS = ['firstName', 'lastName', 'gender', 'ssn', 'dateOfBirth', 'phone', 'email'];
+const GENDERS = ['Male', 'Female', 'Other'];
+
+function validateTenant(data) {
+  const d = data || {};
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  const clean = {
+    firstName: text(d.firstName),
+    lastName: text(d.lastName),
+    gender: text(d.gender) || null,
+    ssn: text(d.ssn),
+    dateOfBirth: text(d.dateOfBirth) || null,
+    phone: text(d.phone) || null,
+    email: text(d.email) || null
+  };
+  if (!clean.firstName) {
+    throw new Error('First name is required.');
+  }
+  if (!clean.lastName) {
+    throw new Error('Last name is required.');
+  }
+  if (clean.gender !== null && !GENDERS.includes(clean.gender)) {
+    throw new Error('Gender must be Male, Female or Other.');
+  }
+  const digits = clean.ssn.replace(/[\s-]/g, '');
+  if (!/^\d{9}$/.test(digits)) {
+    throw new Error('SSN must be 9 digits (e.g. 123-45-6789).');
+  }
+  clean.ssn = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+  if (clean.dateOfBirth !== null && !isValidDate(clean.dateOfBirth)) {
+    throw new Error('Date of birth must be a valid date (or left blank).');
+  }
+  if (clean.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean.email)) {
+    throw new Error('Email must be a valid address (or left blank).');
+  }
+  return clean;
+}
+
+function listTenants() {
+  return db.prepare(`SELECT id, ${TENANT_FIELDS.join(', ')} FROM tenants ORDER BY lower(lastName), lower(firstName), id`)
+    .all().map(toPlain);
+}
+
+function addTenant(data) {
+  const clean = validateTenant(data);
+  if (db.prepare('SELECT 1 FROM tenants WHERE ssn = ?').get(clean.ssn)) {
+    throw new Error('A tenant with that SSN already exists.');
+  }
+  const cols = TENANT_FIELDS.join(', ');
+  const params = TENANT_FIELDS.map((f) => '@' + f).join(', ');
+  const { lastInsertRowid } = db.prepare(`INSERT INTO tenants (${cols}) VALUES (${params})`).run(clean);
+  return toPlain(db.prepare(`SELECT id, ${cols} FROM tenants WHERE id = ?`).get(Number(lastInsertRowid)));
 }
 
 // v5: make the database enforce what the app only checked before.
@@ -409,9 +564,43 @@ function addYear(value) {
 
 const SELECT_HOUSE = `SELECT id, ${PROPERTY_FIELDS.join(', ')} FROM properties`;
 
-// Houses only (no yearly figures).
+// A house plus its leasing contracts (oldest first).
+function withLeases(row) {
+  const leases = db.prepare(`
+    SELECT id, startDate, endDate, monthlyRent, moveInDate, moveOutDate
+    FROM leases WHERE propertyId = ? ORDER BY startDate, id
+  `).all(row.id).map((l) => ({
+    ...l,
+    tenants: db.prepare('SELECT tenantId, occupying FROM lease_tenants WHERE leaseId = ? ORDER BY tenantId')
+      .all(l.id).map((r) => ({ tenantId: r.tenantId, occupying: r.occupying === 1 }))
+  }));
+  return { ...toPlain(row), leases };
+}
+
+// Replace a house's leases with the given (already validated) list.
+function setLeases(propertyId, leases) {
+  db.prepare('DELETE FROM leases WHERE propertyId = ?').run(propertyId);
+  const insert = db.prepare(`
+    INSERT INTO leases (propertyId, startDate, endDate, monthlyRent, moveInDate, moveOutDate)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const link = db.prepare('INSERT INTO lease_tenants (leaseId, tenantId, occupying) VALUES (?, ?, ?)');
+  const exists = db.prepare('SELECT 1 FROM tenants WHERE id = ?');
+  for (const l of leases) {
+    const leaseId = Number(insert.run(propertyId, l.startDate, l.endDate, l.monthlyRent, l.moveInDate, l.moveOutDate)
+      .lastInsertRowid);
+    for (const t of l.tenants) {
+      if (!exists.get(t.tenantId)) {
+        throw new Error('A selected tenant no longer exists.');
+      }
+      link.run(leaseId, t.tenantId, t.occupying ? 1 : 0);
+    }
+  }
+}
+
+// Houses with their leases (no yearly figures).
 function listProperties() {
-  return db.prepare(`${SELECT_HOUSE} ORDER BY lower(address), id`).all().map(toPlain);
+  return db.prepare(`${SELECT_HOUSE} ORDER BY lower(address), id`).all().map(withLeases);
 }
 
 // Validate only the house fields; any yearly data in `data` is ignored (placeholders
@@ -430,25 +619,44 @@ function houseClash(clean, exceptId) {
 
 function addProperty(data) {
   const clean = validateHouse(data);
+  const leases = cleanLeases((data || {}).leases);
   if (houseClash(clean, -1)) {
     throw new Error('A property with that address, city and zip already exists.');
   }
   const cols = PROPERTY_FIELDS.join(', ');
   const params = PROPERTY_FIELDS.map((f) => '@' + f).join(', ');
-  const { lastInsertRowid } = db.prepare(`INSERT INTO properties (${cols}) VALUES (${params})`).run(clean);
-  return toPlain(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(Number(lastInsertRowid)));
+  db.exec('BEGIN');
+  try {
+    const { lastInsertRowid } = db.prepare(`INSERT INTO properties (${cols}) VALUES (${params})`).run(clean);
+    const id = Number(lastInsertRowid);
+    setLeases(id, leases);
+    db.exec('COMMIT');
+    return withLeases(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(id));
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 
 function updateProperty(id, data) {
   const clean = validateHouse(data);
+  const leases = cleanLeases((data || {}).leases);
   if (!db.prepare('SELECT 1 FROM properties WHERE id = ?').get(id)) {
     throw new Error('Property not found.');
   }
   if (houseClash(clean, id)) {
     throw new Error('Another property already has that address, city and zip.');
   }
-  setPropertyFields(id, clean);
-  return toPlain(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(id));
+  db.exec('BEGIN');
+  try {
+    setPropertyFields(id, clean);
+    setLeases(id, leases);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return withLeases(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(id));
 }
 
 function list(yearValue) {
@@ -613,4 +821,4 @@ function copyFromYear(targetValue, sourceValue, ids) {
   return copied;
 }
 
-module.exports = { init, close, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+module.exports = { init, close, listTenants, addTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };

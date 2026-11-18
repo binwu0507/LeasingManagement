@@ -111,6 +111,37 @@ main h2 { margin: 0 0 12px; font-size: 1.1rem; }
 
 /* Repair items card in the edit dialog */
 dialog:has(.repairs) { width: 640px; }
+dialog:has(.leases) { width: 860px; }
+.leases { border: 1px solid #d5d9df; border-radius: 8px; margin: 0 0 12px; padding: 6px 10px 10px; }
+.leases legend { font-weight: 600; color: #1f2733; padding: 0 6px; }
+.renew-tenants { border: 1px solid #d5d9df; border-radius: 8px; margin: 0 0 12px; padding: 6px 10px; }
+.renew-tenants legend { font-weight: 600; color: #1f2733; padding: 0 6px; }
+.renew-tenants label { display: flex; flex-direction: row; align-items: center; gap: 6px; font-weight: 400; margin: 2px 0; }
+.renew-tenants input[type="checkbox"] { width: auto; margin: 0; }
+.tenant-button {
+  width: 100%; margin: 0; padding: 3px 5px; font-size: 0.78rem; text-align: left; background: #fff;
+  border: 1px solid #d5d9df; border-radius: 6px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 24px;
+}
+.tenant-button .placeholder { color: #8a92a1; }
+.tenant-menu {
+  position: fixed; z-index: 1000; min-width: 190px; max-height: 220px; overflow-y: auto;
+  background: #fff; border: 1px solid #d5d9df; border-radius: 8px; padding: 6px 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); font-size: 0.8rem;
+}
+.tenant-menu label { display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 2px 0; font-weight: 400; }
+.tenant-menu input[type="checkbox"] { width: auto; margin: 0; }
+.tenant-add { display: flex; gap: 4px; margin-top: 6px; }
+.tenant-add input { flex: 1; min-width: 0; margin: 0; padding: 3px 5px; font-size: 0.78rem; }
+.tenant-add button { padding: 3px 8px; font-size: 0.78rem; }
+.lease-table th:nth-child(n), .lease-table td:nth-child(n) { width: auto; }
+.lease-table th:nth-child(1), .lease-table td:nth-child(1),
+.lease-table th:nth-child(2), .lease-table td:nth-child(2),
+.lease-table th:nth-child(4), .lease-table td:nth-child(4),
+.lease-table th:nth-child(5), .lease-table td:nth-child(5) { width: 118px; }
+.lease-table th:nth-child(3), .lease-table td:nth-child(3) { width: 84px; }
+.lease-table th:nth-child(7), .lease-table td:nth-child(7) { width: 76px; white-space: nowrap; }
+.lease-table button.renew { padding: 2px 6px; margin: 0 4px 0 0; font-size: 0.72rem; }
 .repairs { border: 1px solid #d5d9df; border-radius: 8px; margin: 0 0 12px; padding: 6px 10px 10px; }
 .repairs legend { font-weight: 600; color: #1f2733; padding: 0 6px; }
 .repair-scroll { max-height: 150px; overflow-y: auto; margin-bottom: 8px; }

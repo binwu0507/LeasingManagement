@@ -100,7 +100,7 @@ export default function App() {
   async function saveHouse(values) {
     // Property-level fields only; yearly data is never sent from the home page
     const house = Object.fromEntries(
-      ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'].map((f) => [f, values[f]])
+      ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate', 'leases'].map((f) => [f, values[f]])
     );
     const res = editingHouse
       ? await window.api.properties.updateHouse(editingHouse.id, house)
