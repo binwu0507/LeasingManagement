@@ -372,6 +372,13 @@ function validateTenant(data) {
     throw new Error('SSN must be 9 digits (e.g. 123-45-6789).');
   }
   clean.ssn = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+  if (clean.phone !== null) {
+    const p = clean.phone.replace(/\D/g, '');
+    if (!/^\d{10}$/.test(p)) {
+      throw new Error('Phone must be 10 digits (e.g. (555) 123-4567), or left blank.');
+    }
+    clean.phone = `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}`;
+  }
   if (clean.dateOfBirth !== null && !isValidDate(clean.dateOfBirth)) {
     throw new Error('Date of birth must be a valid date (or left blank).');
   }
@@ -564,43 +571,84 @@ function addYear(value) {
 
 const SELECT_HOUSE = `SELECT id, ${PROPERTY_FIELDS.join(', ')} FROM properties`;
 
-// A house plus its leasing contracts (oldest first).
-function withLeases(row) {
-  const leases = db.prepare(`
-    SELECT id, startDate, endDate, monthlyRent, moveInDate, moveOutDate
-    FROM leases WHERE propertyId = ? ORDER BY startDate, id
-  `).all(row.id).map((l) => ({
-    ...l,
+const SELECT_LEASE = 'SELECT id, startDate, endDate, monthlyRent, moveInDate, moveOutDate FROM leases';
+
+// A lease row plus its linked tenants.
+function withTenants(l) {
+  return {
+    ...toPlain(l),
     tenants: db.prepare('SELECT tenantId, occupying FROM lease_tenants WHERE leaseId = ? ORDER BY tenantId')
       .all(l.id).map((r) => ({ tenantId: r.tenantId, occupying: r.occupying === 1 }))
-  }));
-  return { ...toPlain(row), leases };
+  };
 }
 
-// Replace a house's leases with the given (already validated) list.
-function setLeases(propertyId, leases) {
-  db.prepare('DELETE FROM leases WHERE propertyId = ?').run(propertyId);
-  const insert = db.prepare(`
-    INSERT INTO leases (propertyId, startDate, endDate, monthlyRent, moveInDate, moveOutDate)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
+// A property's leasing contracts (oldest first), each with its tenants.
+function listLeases(propertyId) {
+  return db.prepare(`${SELECT_LEASE} WHERE propertyId = ? ORDER BY startDate, id`).all(propertyId).map(withTenants);
+}
+
+// Replace a lease's tenant links with the given (already validated) list.
+function setLeaseTenants(leaseId, tenants) {
+  db.prepare('DELETE FROM lease_tenants WHERE leaseId = ?').run(leaseId);
   const link = db.prepare('INSERT INTO lease_tenants (leaseId, tenantId, occupying) VALUES (?, ?, ?)');
   const exists = db.prepare('SELECT 1 FROM tenants WHERE id = ?');
-  for (const l of leases) {
-    const leaseId = Number(insert.run(propertyId, l.startDate, l.endDate, l.monthlyRent, l.moveInDate, l.moveOutDate)
-      .lastInsertRowid);
-    for (const t of l.tenants) {
-      if (!exists.get(t.tenantId)) {
-        throw new Error('A selected tenant no longer exists.');
-      }
-      link.run(leaseId, t.tenantId, t.occupying ? 1 : 0);
+  for (const t of tenants) {
+    if (!exists.get(t.tenantId)) {
+      throw new Error('A selected tenant no longer exists.');
     }
+    link.run(leaseId, t.tenantId, t.occupying ? 1 : 0);
   }
 }
 
-// Houses with their leases (no yearly figures).
+// Leases are saved on their own, independent of the property's own details.
+function addLease(propertyId, data) {
+  const [clean] = cleanLeases([data]);
+  if (!db.prepare('SELECT 1 FROM properties WHERE id = ?').get(propertyId)) {
+    throw new Error('Property not found.');
+  }
+  db.exec('BEGIN');
+  try {
+    const { lastInsertRowid } = db.prepare(`
+      INSERT INTO leases (propertyId, startDate, endDate, monthlyRent, moveInDate, moveOutDate)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(propertyId, clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate);
+    setLeaseTenants(Number(lastInsertRowid), clean.tenants);
+    db.exec('COMMIT');
+    return withTenants(db.prepare(`${SELECT_LEASE} WHERE id = ?`).get(Number(lastInsertRowid)));
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+function updateLease(id, data) {
+  const [clean] = cleanLeases([data]);
+  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(id)) {
+    throw new Error('Lease not found.');
+  }
+  db.exec('BEGIN');
+  try {
+    db.prepare(`
+      UPDATE leases SET startDate = ?, endDate = ?, monthlyRent = ?, moveInDate = ?, moveOutDate = ? WHERE id = ?
+    `).run(clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate, id);
+    setLeaseTenants(id, clean.tenants);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return withTenants(db.prepare(`${SELECT_LEASE} WHERE id = ?`).get(id));
+}
+
+function deleteLease(id) {
+  if (db.prepare('DELETE FROM leases WHERE id = ?').run(id).changes === 0) {
+    throw new Error('Lease not found.');
+  }
+}
+
+// Houses (no yearly figures, no leases).
 function listProperties() {
-  return db.prepare(`${SELECT_HOUSE} ORDER BY lower(address), id`).all().map(withLeases);
+  return db.prepare(`${SELECT_HOUSE} ORDER BY lower(address), id`).all().map(toPlain);
 }
 
 // Validate only the house fields; any yearly data in `data` is ignored (placeholders
@@ -619,44 +667,25 @@ function houseClash(clean, exceptId) {
 
 function addProperty(data) {
   const clean = validateHouse(data);
-  const leases = cleanLeases((data || {}).leases);
   if (houseClash(clean, -1)) {
     throw new Error('A property with that address, city and zip already exists.');
   }
   const cols = PROPERTY_FIELDS.join(', ');
   const params = PROPERTY_FIELDS.map((f) => '@' + f).join(', ');
-  db.exec('BEGIN');
-  try {
-    const { lastInsertRowid } = db.prepare(`INSERT INTO properties (${cols}) VALUES (${params})`).run(clean);
-    const id = Number(lastInsertRowid);
-    setLeases(id, leases);
-    db.exec('COMMIT');
-    return withLeases(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(id));
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
+  const { lastInsertRowid } = db.prepare(`INSERT INTO properties (${cols}) VALUES (${params})`).run(clean);
+  return toPlain(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(Number(lastInsertRowid)));
 }
 
 function updateProperty(id, data) {
   const clean = validateHouse(data);
-  const leases = cleanLeases((data || {}).leases);
   if (!db.prepare('SELECT 1 FROM properties WHERE id = ?').get(id)) {
     throw new Error('Property not found.');
   }
   if (houseClash(clean, id)) {
     throw new Error('Another property already has that address, city and zip.');
   }
-  db.exec('BEGIN');
-  try {
-    setPropertyFields(id, clean);
-    setLeases(id, leases);
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
-  return withLeases(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(id));
+  setPropertyFields(id, clean);
+  return toPlain(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(id));
 }
 
 function list(yearValue) {
@@ -821,4 +850,4 @@ function copyFromYear(targetValue, sourceValue, ids) {
   return copied;
 }
 
-module.exports = { init, close, listTenants, addTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+module.exports = { init, close, listLeases, addLease, updateLease, deleteLease, listTenants, addTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };

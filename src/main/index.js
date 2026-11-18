@@ -33,6 +33,10 @@ function respond(action) {
 
 ipcMain.handle('years:list', () => respond(() => store.listYears()));
 ipcMain.handle('years:add', (event, year) => respond(() => store.addYear(year)));
+ipcMain.handle('leases:list', (event, propertyId) => respond(() => store.listLeases(propertyId)));
+ipcMain.handle('leases:add', (event, propertyId, data) => respond(() => store.addLease(propertyId, data)));
+ipcMain.handle('leases:update', (event, id, data) => respond(() => store.updateLease(id, data)));
+ipcMain.handle('leases:delete', (event, id) => respond(() => store.deleteLease(id)));
 ipcMain.handle('tenants:list', () => respond(() => store.listTenants()));
 ipcMain.handle('tenants:add', (event, data) => respond(() => store.addTenant(data)));
 ipcMain.handle('properties:listAll', () => respond(() => store.listProperties()));

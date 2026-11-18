@@ -4,6 +4,8 @@ import PropertyForm from './components/PropertyForm.jsx';
 import YearlySummary from './components/YearlySummary.jsx';
 import CopyFromYear from './components/CopyFromYear.jsx';
 import YearSelect from './components/YearSelect.jsx';
+import Toaster from './components/Toaster.jsx';
+import { toast } from './toast.js';
 
 export default function App() {
   const [years, setYears] = useState([]);
@@ -74,6 +76,7 @@ export default function App() {
     }
     setEditing(undefined);
     refresh();
+    toast('Saved.');
   }
 
   async function copyFrom(source, ids) {
@@ -100,7 +103,7 @@ export default function App() {
   async function saveHouse(values) {
     // Property-level fields only; yearly data is never sent from the home page
     const house = Object.fromEntries(
-      ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate', 'leases'].map((f) => [f, values[f]])
+      ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'].map((f) => [f, values[f]])
     );
     const res = editingHouse
       ? await window.api.properties.updateHouse(editingHouse.id, house)
@@ -110,11 +113,13 @@ export default function App() {
     }
     setEditingHouse(undefined);
     loadAll();
+    toast('Property saved.');
   }
 
   if (year === null) {
     return (
       <>
+        <Toaster />
         <YearSelect
           years={years}
           properties={allProperties}
@@ -137,6 +142,7 @@ export default function App() {
 
   return (
     <>
+      <Toaster />
       <header>
         <button onClick={() => setYear(null)}>← Home</button>
         <h1>Properties {year}</h1>

@@ -31,6 +31,16 @@ button {
 button:hover { background: #eef0f3; }
 button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
 button.primary:hover { background: #1d4fd0; }
+.toast {
+  inset: 24px 24px auto auto; margin: 0; border: none; border-radius: 8px;
+  background: #1f2733; color: #fff; padding: 10px 16px; font-size: 0.9rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+.toast::before { content: '✓ '; color: #4ade80; font-weight: 700; }
+button:disabled, button.primary:disabled {
+  background: #e5e8ec; border-color: #d5d9df; color: #9aa1ad; cursor: not-allowed; opacity: 0.8;
+}
+button:disabled:hover, button.primary:disabled:hover { background: #e5e8ec; }
 button.danger { color: #b42318; border-color: #e8b4ae; }
 button.danger:hover { background: #fdecea; }
 
@@ -140,7 +150,7 @@ dialog:has(.leases) { width: 860px; }
 .lease-table th:nth-child(4), .lease-table td:nth-child(4),
 .lease-table th:nth-child(5), .lease-table td:nth-child(5) { width: 118px; }
 .lease-table th:nth-child(3), .lease-table td:nth-child(3) { width: 84px; }
-.lease-table th:nth-child(7), .lease-table td:nth-child(7) { width: 76px; white-space: nowrap; }
+.lease-table th:nth-child(7), .lease-table td:nth-child(7) { width: 130px; white-space: nowrap; }
 .lease-table button.renew { padding: 2px 6px; margin: 0 4px 0 0; font-size: 0.72rem; }
 .repairs { border: 1px solid #d5d9df; border-radius: 8px; margin: 0 0 12px; padding: 6px 10px 10px; }
 .repairs legend { font-weight: 600; color: #1f2733; padding: 0 6px; }

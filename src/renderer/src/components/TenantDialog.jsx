@@ -1,6 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+// Input masks: keep only digits and lay them out as typed.
+const digits = (s, max) => s.replace(/\D/g, '').slice(0, max);
+const formatSsn = (s) => {
+  const d = digits(s, 9);
+  return [d.slice(0, 3), d.slice(3, 5), d.slice(5)].filter(Boolean).join('-');
+};
+const formatPhone = (s) => {
+  const d = digits(s, 10);
+  if (d.length <= 3) {
+    return d.length ? `(${d}` : '';
+  }
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}${d.length > 6 ? '-' + d.slice(6) : ''}`;
+};
+
 const EMPTY = { firstName: '', lastName: '', gender: '', ssn: '', dateOfBirth: '', phone: '', email: '' };
 
 /**
@@ -18,7 +32,11 @@ export default function TenantDialog({ onAdded, onCancel }) {
     }
   }, []);
 
-  const set = (e) => setValues((v) => ({ ...v, [e.target.name]: e.target.value }));
+  const set = (e) => {
+    const { name, value } = e.target;
+    const masked = name === 'ssn' ? formatSsn(value) : name === 'phone' ? formatPhone(value) : value;
+    setValues((v) => ({ ...v, [name]: masked }));
+  };
 
   async function submit(e) {
     e.preventDefault();
@@ -59,8 +77,14 @@ export default function TenantDialog({ onAdded, onCancel }) {
           {field('Date of birth', 'dateOfBirth', { type: 'date' })}
         </div>
         <div className="row">
-          {field('SSN', 'ssn', { type: 'text', placeholder: '123-45-6789', autoComplete: 'off', required: true })}
-          {field('Phone', 'phone', { type: 'tel' })}
+          {field('SSN', 'ssn', {
+            type: 'text', placeholder: '123-45-6789', autoComplete: 'off', inputMode: 'numeric',
+            maxLength: 11, pattern: '\\d{3}-\\d{2}-\\d{4}', title: 'Format: 123-45-6789', required: true
+          })}
+          {field('Phone', 'phone', {
+            type: 'tel', placeholder: '(555) 123-4567', inputMode: 'numeric',
+            maxLength: 14, pattern: '\\(\\d{3}\\) \\d{3}-\\d{4}', title: 'Format: (555) 123-4567'
+          })}
         </div>
         {field('Email', 'email', { type: 'email' })}
         {error && <p className="error">{error}</p>}
