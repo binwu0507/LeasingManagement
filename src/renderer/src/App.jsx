@@ -3,6 +3,7 @@ import PropertyTable from './components/PropertyTable.jsx';
 import PropertyForm from './components/PropertyForm.jsx';
 import YearlySummary from './components/YearlySummary.jsx';
 import CopyFromYear from './components/CopyFromYear.jsx';
+import AddToYear from './components/AddToYear.jsx';
 import YearSelect from './components/YearSelect.jsx';
 import Toaster from './components/Toaster.jsx';
 import TenantsPage from './components/TenantsPage.jsx';
@@ -13,8 +14,9 @@ export default function App() {
   const [year, setYear] = useState(null); // null = start screen, nothing chosen yet
   const [properties, setProperties] = useState([]); // records of the selected year
   const [allProperties, setAllProperties] = useState([]); // houses, for the home page
-  // undefined = dialog closed, null = adding, object = editing that house
+  // undefined = dialog closed, object = editing that year record
   const [editing, setEditing] = useState(undefined);
+  const [adding, setAdding] = useState(false); // "Add Property…" picker open
   const [copying, setCopying] = useState(false);
   const [showTenants, setShowTenants] = useState(false); // home page link: the all-tenants page
   // Home page dialog: undefined = closed, null = adding, object = editing that house
@@ -70,15 +72,22 @@ export default function App() {
 
   // Returns an error message to show in the form, or nothing on success
   async function save(values) {
-    const res = editing
-      ? await window.api.properties.update(editing.id, values)
-      : await window.api.properties.add(year, values);
+    const res = await window.api.properties.update(editing.id, values);
     if (!res.ok) {
       return res.error;
     }
     setEditing(undefined);
     refresh();
     toast('Saved.');
+  }
+
+  async function addToYear(propertyIds) {
+    const res = await window.api.properties.addToYear(year, propertyIds);
+    if (!res.ok) {
+      return res.error;
+    }
+    setAdding(false);
+    refresh();
   }
 
   async function copyFrom(source, ids) {
@@ -168,7 +177,7 @@ export default function App() {
         >
           Copy from year…
         </button>
-        <button className="primary" onClick={() => setEditing(null)}>+ Add House</button>
+        <button className="primary" onClick={() => { loadAll(); setAdding(true); }}>+ Add Property…</button>
       </header>
 
       <main>
@@ -185,9 +194,19 @@ export default function App() {
         />
       )}
 
-      {editing !== undefined && (
+      {adding && (
+        <AddToYear
+          year={year}
+          houses={allProperties}
+          existing={properties}
+          onAdd={addToYear}
+          onCancel={() => setAdding(false)}
+        />
+      )}
+
+      {editing && (
         <PropertyForm
-          key={editing ? editing.id : 'new'}
+          key={editing.id}
           property={editing}
           onSave={save}
           onCancel={() => setEditing(undefined)}

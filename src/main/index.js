@@ -49,6 +49,7 @@ ipcMain.handle('properties:add', (event, year, data) => respond(() => store.add(
 ipcMain.handle('properties:update', (event, id, data) => respond(() => store.update(id, data)));
 ipcMain.handle('properties:copy', (event, target, source, ids) =>
   respond(() => store.copyFromYear(target, source, ids)));
+ipcMain.handle('properties:addToYear', (event, year, ids) => respond(() => store.addHousesToYear(year, ids)));
 ipcMain.handle('properties:delete', (event, id) => respond(() => store.remove(id)));
 
 app.whenReady().then(() => {

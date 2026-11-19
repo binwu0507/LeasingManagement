@@ -3,7 +3,7 @@ import { MONEY_COLUMNS, money, annualTotals } from '../finance.js';
 
 export default function PropertyTable({ properties, onEdit, onDelete }) {
   if (properties.length === 0) {
-    return <p id="empty-msg">No properties yet. Click "Add House" to create one.</p>;
+    return <p id="empty-msg">No properties yet. Click "Add Property…" to add one to this year.</p>;
   }
 
   const totals = annualTotals(properties);

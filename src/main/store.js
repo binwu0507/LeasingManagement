@@ -947,4 +947,38 @@ function copyFromYear(targetValue, sourceValue, ids) {
   return copied;
 }
 
-module.exports = { init, close, listLeases, addLease, updateLease, deleteLease, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+// Add existing houses (by property id) to a year with a zeroed yearly record each.
+// Houses already in that year are skipped.
+function addHousesToYear(yearValue, propertyIds) {
+  const year = validYear(yearValue);
+  if (!Array.isArray(propertyIds) || propertyIds.length === 0) {
+    throw new Error('Select at least one property.');
+  }
+  const exists = db.prepare('SELECT purchaseDate FROM properties WHERE id = ?');
+  const has = db.prepare('SELECT 1 FROM property_years WHERE propertyId = ? AND year = ?');
+  const insert = db.prepare(`
+    INSERT INTO property_years (propertyId, year, monthlyRent, propertyTax, hoaFee, mortgage, insurance)
+    VALUES (?, ?, 0, 0, 0, 0, NULL)
+  `);
+  let added = 0;
+  db.exec('BEGIN');
+  try {
+    addYear(year);
+    for (const id of new Set(propertyIds.map(Number))) {
+      const house = exists.get(id);
+      // Skip unknown houses, ones without a purchase date or bought after this year, and ones already in it
+      if (!house || !house.purchaseDate || Number(house.purchaseDate.slice(0, 4)) > year || has.get(id, year)) {
+        continue;
+      }
+      insert.run(id, year);
+      added++;
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return added;
+}
+
+module.exports = { init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
