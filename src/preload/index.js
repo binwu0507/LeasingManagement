@@ -15,7 +15,8 @@ contextBridge.exposeInMainWorld('api', {
     list: () => ipcRenderer.invoke('tenants:list'),
     history: (id) => ipcRenderer.invoke('tenants:history', id),
     findMatches: (data) => ipcRenderer.invoke('tenants:matches', data),
-    add: (data) => ipcRenderer.invoke('tenants:add', data)
+    add: (data) => ipcRenderer.invoke('tenants:add', data),
+    update: (id, data) => ipcRenderer.invoke('tenants:update', id, data)
   },
   properties: {
     addHouse: (data) => ipcRenderer.invoke('houses:add', data),

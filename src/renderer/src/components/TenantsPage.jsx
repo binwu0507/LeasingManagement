@@ -1,10 +1,82 @@
 import { useEffect, useState } from 'react';
 import LeaseHistoryDialog from './LeaseHistoryDialog.jsx';
 import { usDate } from '../finance.js';
+import { toast } from '../toast.js';
 
 const maskSsn = (ssn) => `***-**-${ssn.slice(-4)}`;
 
-/** Lists every tenant with all their stored information. SSNs are masked unless revealed. */
+// Same input masks as the Add Tenant dialog
+const digits = (s, max) => s.replace(/\D/g, '').slice(0, max);
+const formatSsn = (s) => {
+  const d = digits(s, 9);
+  return [d.slice(0, 3), d.slice(3, 5), d.slice(5)].filter(Boolean).join('-');
+};
+const formatPhone = (s) => {
+  const d = digits(s, 10);
+  if (d.length <= 3) {
+    return d.length ? `(${d}` : '';
+  }
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}${d.length > 6 ? '-' + d.slice(6) : ''}`;
+};
+const MASKS = { ssn: formatSsn, phone: formatPhone };
+const FIELDS = ['firstName', 'lastName', 'gender', 'ssn', 'dateOfBirth', 'phone', 'email'];
+
+/**
+ * A table cell that is always an input, styled to look like text until hovered or focused.
+ * Commits when it loses focus or on Enter (only if changed); Escape discards the edit.
+ * `onCommit(field, value)` saves it; after a failure the cell shows the stored value again.
+ */
+function EditCell({ value, field, label, display, onCommit, ...rest }) {
+  const [draft, setDraft] = useState(null); // null = not editing
+  const [focused, setFocused] = useState(false);
+  const stored = value ?? '';
+  const text = draft ?? stored;
+
+  function commit() {
+    const next = draft;
+    setDraft(null);
+    if (next !== null && next !== stored) {
+      onCommit(field, next);
+    }
+  }
+
+  const common = {
+    className: 'cell-edit',
+    'aria-label': label,
+    onFocus: () => setFocused(true),
+    onBlur: () => { setFocused(false); commit(); },
+    onKeyDown: (e) => {
+      if (e.key === 'Enter') {
+        e.currentTarget.blur();
+      } else if (e.key === 'Escape') {
+        setDraft(null);
+        e.currentTarget.blur();
+      }
+    }
+  };
+
+  if (field === 'gender') {
+    return (
+      <select {...common} value={text} onChange={(e) => setDraft(e.target.value)}>
+        <option value="">—</option>
+        <option>Male</option>
+        <option>Female</option>
+        <option>Other</option>
+      </select>
+    );
+  }
+  const mask = MASKS[field];
+  return (
+    <input
+      {...common}
+      {...rest}
+      value={display && !focused ? display(text) : text}
+      onChange={(e) => setDraft(mask ? mask(e.target.value) : e.target.value)}
+    />
+  );
+}
+
+/** Lists every tenant with all their stored information; the first seven columns edit in place. */
 export default function TenantsPage() {
   const [tenants, setTenants] = useState(null); // null while loading
   const [error, setError] = useState('');
@@ -20,6 +92,26 @@ export default function TenantsPage() {
       }
     });
   }, []);
+
+  // Saves one changed field; the whole record is validated in the main process.
+  async function saveField(t, field, value) {
+    const values = Object.fromEntries(FIELDS.map((f) => [f, t[f] ?? '']));
+    values[field] = value;
+    const res = await window.api.tenants.update(t.id, values);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setError('');
+    setTenants((list) => list.map((x) => (x.id === t.id ? { ...x, ...res.data } : x)));
+    toast('Saved.');
+  }
+
+  const cell = (t, field, label, props = {}) => (
+    <td>
+      <EditCell field={field} value={t[field]} label={label} onCommit={(f, v) => saveField(t, f, v)} {...props} />
+    </td>
+  );
 
   return (
     <>
@@ -49,13 +141,16 @@ export default function TenantsPage() {
             <tbody>
               {tenants.map((t) => (
                 <tr key={t.id}>
-                  <td>{t.firstName}</td>
-                  <td>{t.lastName}</td>
-                  <td>{t.gender || '—'}</td>
-                  <td>{showSsn ? t.ssn : maskSsn(t.ssn)}</td>
-                  <td>{usDate(t.dateOfBirth) || '—'}</td>
-                  <td>{t.phone || '—'}</td>
-                  <td>{t.email || '—'}</td>
+                  {cell(t, 'firstName', 'First name', { type: 'text' })}
+                  {cell(t, 'lastName', 'Last name', { type: 'text' })}
+                  {cell(t, 'gender', 'Gender')}
+                  {cell(t, 'ssn', 'SSN', {
+                    type: 'text', maxLength: 11, inputMode: 'numeric', autoComplete: 'off',
+                    display: showSsn ? undefined : maskSsn
+                  })}
+                  {cell(t, 'dateOfBirth', 'Date of birth', { type: 'date' })}
+                  {cell(t, 'phone', 'Phone', { type: 'tel', maxLength: 14, placeholder: '—' })}
+                  {cell(t, 'email', 'Email', { type: 'email', placeholder: '—' })}
                   <td>
                     <button type="button" className="map-icon" onClick={() => setHistoryFor(t)}
                       title="Leasing history" aria-label={`Leasing history of ${t.firstName} ${t.lastName}`}>🕘</button>

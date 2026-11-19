@@ -1,6 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { money as formatMoney } from '../finance.js';
 
+const US_STATES = [
+  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
+  ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'], ['DC', 'District of Columbia'],
+  ['FL', 'Florida'], ['GA', 'Georgia'], ['HI', 'Hawaii'], ['ID', 'Idaho'], ['IL', 'Illinois'],
+  ['IN', 'Indiana'], ['IA', 'Iowa'], ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'],
+  ['ME', 'Maine'], ['MD', 'Maryland'], ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'],
+  ['MS', 'Mississippi'], ['MO', 'Missouri'], ['MT', 'Montana'], ['NE', 'Nebraska'], ['NV', 'Nevada'],
+  ['NH', 'New Hampshire'], ['NJ', 'New Jersey'], ['NM', 'New Mexico'], ['NY', 'New York'],
+  ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'], ['OK', 'Oklahoma'], ['OR', 'Oregon'],
+  ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'], ['SC', 'South Carolina'], ['SD', 'South Dakota'],
+  ['TN', 'Tennessee'], ['TX', 'Texas'], ['UT', 'Utah'], ['VT', 'Vermont'], ['VA', 'Virginia'],
+  ['WA', 'Washington'], ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming']
+];
+
 const EMPTY = {
   address: '', city: '', state: '', zip: '',
   bedrooms: 0, bathrooms: 0, sqft: 0, purchaseDate: '',
@@ -98,7 +112,17 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
             {field('Address', 'address', { type: 'text', required: true })}
             <div className="row">
               {field('City', 'city', { type: 'text', required: true })}
-              {field('State', 'state', { type: 'text', maxLength: 2 })}
+              <label>
+                State
+                <select name="state" value={values.state} onChange={set}>
+                  <option value="">—</option>
+                  {/* keep a stored value that isn't in the list selectable so it isn't silently lost */}
+                  {values.state && !US_STATES.some(([c]) => c === values.state) && (
+                    <option value={values.state}>{values.state}</option>
+                  )}
+                  {US_STATES.map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
+                </select>
+              </label>
               {field('Zip', 'zip', { type: 'text' })}
             </div>
             <div className="row">

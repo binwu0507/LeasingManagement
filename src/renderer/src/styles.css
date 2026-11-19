@@ -637,3 +637,27 @@ th.sortable button.link { font: inherit; text-transform: inherit; letter-spacing
 th.sortable button.link:hover { color: var(--primary); }
 th.sortable[aria-sort="ascending"] button.link,
 th.sortable[aria-sort="descending"] button.link { color: var(--primary); }
+
+/* In-place editable cells: look like text until hovered or focused */
+input.cell-edit, select.cell-edit {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 6px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
+}
+input.cell-edit:hover, select.cell-edit:hover { border-color: var(--border-strong); background: var(--surface); }
+input.cell-edit:focus, select.cell-edit:focus {
+  outline: none;
+  background: var(--surface);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+input.cell-edit::placeholder { color: var(--text-muted); opacity: 1; }
+select.cell-edit { appearance: none; cursor: pointer; }
+td:has(> .cell-edit) { padding-top: 6px; padding-bottom: 6px; }

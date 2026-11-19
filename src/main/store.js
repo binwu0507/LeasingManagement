@@ -466,6 +466,19 @@ function addTenant(data) {
   return toPlain(db.prepare(`SELECT id, ${cols} FROM tenants WHERE id = ?`).get(Number(lastInsertRowid)));
 }
 
+function updateTenant(id, data) {
+  const clean = validateTenant(data);
+  if (!db.prepare('SELECT 1 FROM tenants WHERE id = ?').get(id)) {
+    throw new Error('Tenant not found.');
+  }
+  if (db.prepare('SELECT 1 FROM tenants WHERE ssn = ? AND id <> ?').get(clean.ssn, id)) {
+    throw new Error('A tenant with that SSN already exists.');
+  }
+  const sets = TENANT_FIELDS.map((f) => `${f} = @${f}`).join(', ');
+  db.prepare(`UPDATE tenants SET ${sets} WHERE id = @id`).run({ ...clean, id });
+  return toPlain(db.prepare(`SELECT id, ${TENANT_FIELDS.join(', ')} FROM tenants WHERE id = ?`).get(id));
+}
+
 // v5: make the database enforce what the app only checked before.
 //  - one `properties` row per address/city/zip (case-insensitive)
 //  - one `property_years` row per house per year
@@ -983,4 +996,4 @@ function addHousesToYear(yearValue, propertyIds) {
   return added;
 }
 
-module.exports = { init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+module.exports = { init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
