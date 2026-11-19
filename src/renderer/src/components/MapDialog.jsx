@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useT } from '../i18n.jsx';
 
 // Full address as one search string, e.g. "1 Main St, Austin, TX 78701".
 const fullAddress = (p) =>
@@ -9,6 +10,7 @@ const fullAddress = (p) =>
  * so it needs an internet connection (and sends the address to Google).
  */
 export default function MapDialog({ property, onClose }) {
+  const t = useT();
   const dialogRef = useRef(null);
 
   useEffect(() => {
@@ -24,9 +26,9 @@ export default function MapDialog({ property, onClose }) {
   return (
     <dialog ref={dialogRef} className="map-dialog" onCancel={onClose}>
       <h2>{address}</h2>
-      <iframe title={`Map of ${address}`} src={src} loading="lazy" referrerPolicy="no-referrer" />
+      <iframe title={t('Map of {address}', { address })} src={src} loading="lazy" referrerPolicy="no-referrer" />
       <div className="actions">
-        <button type="button" className="primary" onClick={onClose}>Close</button>
+        <button type="button" className="primary" onClick={onClose}>{t('Close')}</button>
       </div>
     </dialog>
   );

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { money as formatMoney, usDate } from '../finance.js';
 import LeaseDialog from './LeaseDialog.jsx';
 import { toast } from '../toast.js';
+import { useT } from '../i18n.jsx';
 
 const EMPTY_LEASE = { startDate: '', endDate: '', monthlyRent: '', moveInDate: '', moveOutDate: '', tenants: [] };
 
@@ -80,6 +81,7 @@ const toLeaseForm = (l) => ({
  * Rendered only while open, so state resets each time it is shown.
  */
 export default function ManageLeaseDialog({ property, onClose }) {
+  const tr = useT();
   const dialogRef = useRef(null);
   const [tenants, setTenants] = useState([]);
   const [leases, setLeases] = useState([]);
@@ -116,7 +118,7 @@ export default function ManageLeaseDialog({ property, onClose }) {
       return res.error;
     }
     await reloadLeases();
-    toast(leaseId === undefined ? 'Lease added.' : 'Lease saved.');
+    toast(leaseId === undefined ? tr('Lease added.') : tr('Lease saved.'));
     return undefined;
   };
   // Names of the tenants occupying a lease, comma-separated.
@@ -130,7 +132,7 @@ export default function ManageLeaseDialog({ property, onClose }) {
   const tenantCreated = (tenant) => {
     if (!tenants.some((t) => t.id === tenant.id)) {
       setTenants((all) => [...all, tenant]);
-      toast('Tenant added.');
+      toast(tr('Tenant added.'));
     }
   };
   // Adds a follow-on lease: starts the day after this one ends, runs one year, same rent and
@@ -152,14 +154,14 @@ export default function ManageLeaseDialog({ property, onClose }) {
     return err;
   };
   const removeLease = async (l) => {
-    if (!confirm(`Delete the lease ${usDate(l.startDate)} to ${usDate(l.endDate)}?`)) {
+    if (!confirm(tr('Delete the lease {start} to {end}?', { start: usDate(l.startDate), end: usDate(l.endDate) }))) {
       return;
     }
     const res = await window.api.leases.remove(l.id);
     if (res.ok) {
       setError('');
       await reloadLeases();
-      toast('Lease deleted.');
+      toast(tr('Lease deleted.'));
     } else {
       setError(res.error);
     }
@@ -175,38 +177,38 @@ export default function ManageLeaseDialog({ property, onClose }) {
     setError('');
     if (action === 'uploadAgreement' && res.data) {
       await reloadLeases();
-      toast('Agreement uploaded.');
+      toast(tr('Agreement uploaded.'));
     } else if (action === 'downloadAgreement' && res.data) {
-      toast('Agreement saved.');
+      toast(tr('Agreement saved.'));
     }
   };
   const removeAgreement = async (l) => {
-    if (!confirm(`Remove the agreement "${l.agreementName}" from this lease?`)) {
+    if (!confirm(tr('Remove the agreement "{name}" from this lease?', { name: l.agreementName }))) {
       return;
     }
     await agreement('removeAgreement', l);
     await reloadLeases();
-    toast('Agreement removed.');
+    toast(tr('Agreement removed.'));
   };
 
   return (
     <dialog ref={dialogRef} onCancel={onClose}>
       <form onSubmit={(e) => e.preventDefault()} noValidate className="manage-lease">
-        <h2>Manage Lease — {property.address}</h2>
+        <h2>{tr('Manage Lease — {address}', { address: property.address })}</h2>
         <fieldset className="leases">
-          <legend>Leasing contracts ({leases.length}) — saved as soon as you confirm</legend>
+          <legend>{tr('Leasing contracts ({n}) — saved as soon as you confirm', { n: leases.length })}</legend>
           {leases.length > 0 && (
             <div className="repair-scroll">
               <table className="repair-table lease-table">
                 <thead>
                   <tr>
-                    <th>Start</th>
-                    <th>End</th>
-                    <th>Rent ($/mo)</th>
-                    <th>Move in</th>
-                    <th>Move out</th>
-                    <th>Tenants</th>
-                    <th>Agreement</th>
+                    <th>{tr('Start')}</th>
+                    <th>{tr('End')}</th>
+                    <th>{tr('Rent ($/mo)')}</th>
+                    <th>{tr('Move in')}</th>
+                    <th>{tr('Move out')}</th>
+                    <th>{tr('Tenants')}</th>
+                    <th>{tr('Agreement')}</th>
                     <th />
                   </tr>
                 </thead>
@@ -224,28 +226,28 @@ export default function ManageLeaseDialog({ property, onClose }) {
                           <>
                             <span className="agreement-name" title={l.agreementName}>📄 {l.agreementName}</span>
                             <button type="button" className="renew" onClick={() => agreement('viewAgreement', l)}
-                              title="Open in your default app">View</button>
+                              title={tr('Open in your default app')}>{tr('View')}</button>
                             <button type="button" className="renew" onClick={() => agreement('downloadAgreement', l)}
-                              title="Save a copy">Download</button>
+                              title={tr('Save a copy')}>{tr('Download')}</button>
                             <button type="button" className="renew" onClick={() => agreement('uploadAgreement', l)}
-                              title="Replace with another file">Replace</button>
+                              title={tr('Replace with another file')}>{tr('Replace')}</button>
                             <button type="button" className="link" onClick={() => removeAgreement(l)}
-                              title="Remove agreement" aria-label="Remove agreement">✕</button>
+                              title={tr('Remove agreement')} aria-label={tr('Remove agreement')}>✕</button>
                           </>
                         ) : (
                           <button type="button" className="renew" onClick={() => agreement('uploadAgreement', l)}
-                            title="Upload the signed residential lease agreement">Upload…</button>
+                            title={tr('Upload the signed residential lease agreement')}>{tr('Upload…')}</button>
                         )}
                       </td>
                       <td>
                         {canRenew(l, leases) && (
                           <button type="button" className="renew" onClick={() => setLeaseDialog({ mode: 'renew', lease: renewalFor(l) })}
-                            title="Add a follow-on lease starting the day after this one ends">Renew</button>
+                            title={tr('Add a follow-on lease starting the day after this one ends')}>{tr('Renew')}</button>
                         )}
                         <button type="button" className="renew" onClick={() => setLeaseDialog({ mode: 'edit', lease: toLeaseForm(l) })}
-                          title="Edit lease">Edit</button>
+                          title={tr('Edit lease')}>{tr('Edit')}</button>
                         <button type="button" className="link" onClick={() => removeLease(l)}
-                          title="Delete lease" aria-label="Delete lease">✕</button>
+                          title={tr('Delete lease')} aria-label={tr('Delete lease')}>✕</button>
                       </td>
                     </tr>
                   ))}
@@ -253,23 +255,23 @@ export default function ManageLeaseDialog({ property, onClose }) {
               </table>
             </div>
           )}
-          <button type="button" onClick={() => setLeaseDialog({ mode: 'add', lease: EMPTY_LEASE })}>+ Add lease</button>
+          <button type="button" onClick={() => setLeaseDialog({ mode: 'add', lease: EMPTY_LEASE })}>{tr('+ Add lease')}</button>
         </fieldset>
 
         {error && <p className="error">{error}</p>}
 
         <div className="actions">
-          <button type="button" onClick={onClose}>Close</button>
+          <button type="button" onClick={onClose}>{tr('Close')}</button>
         </div>
       </form>
       {leaseDialog && (
         <LeaseDialog
-          title={{ add: 'Add Lease', renew: 'Renew Lease', edit: 'Edit Lease' }[leaseDialog.mode]}
-          hint={{
+          title={tr({ add: 'Add Lease', renew: 'Renew Lease', edit: 'Edit Lease' }[leaseDialog.mode])}
+          hint={tr({
             add: 'Fill in the lease and add its tenants, then confirm to save it.',
             renew: 'Review or edit the new lease, then confirm to save it.',
             edit: 'Change the lease, then confirm to save it.'
-          }[leaseDialog.mode]}
+          }[leaseDialog.mode])}
           lease={leaseDialog.lease}
           tenants={tenants}
           applyChange={applyLeaseChange}

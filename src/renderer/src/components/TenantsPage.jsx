@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import LeaseHistoryDialog from './LeaseHistoryDialog.jsx';
 import { usDate } from '../finance.js';
 import { toast } from '../toast.js';
+import { useT } from '../i18n.jsx';
 
 const maskSsn = (ssn) => `***-**-${ssn.slice(-4)}`;
 
@@ -27,6 +28,7 @@ const FIELDS = ['firstName', 'lastName', 'gender', 'ssn', 'dateOfBirth', 'phone'
  * `onCommit(field, value)` saves it; after a failure the cell shows the stored value again.
  */
 function EditCell({ value, field, label, display, onCommit, ...rest }) {
+  const t = useT();
   const [draft, setDraft] = useState(null); // null = not editing
   const [focused, setFocused] = useState(false);
   const stored = value ?? '';
@@ -59,9 +61,9 @@ function EditCell({ value, field, label, display, onCommit, ...rest }) {
     return (
       <select {...common} value={text} onChange={(e) => setDraft(e.target.value)}>
         <option value="">—</option>
-        <option>Male</option>
-        <option>Female</option>
-        <option>Other</option>
+        <option value="Male">{t('Male')}</option>
+        <option value="Female">{t('Female')}</option>
+        <option value="Other">{t('Other')}</option>
       </select>
     );
   }
@@ -78,6 +80,7 @@ function EditCell({ value, field, label, display, onCommit, ...rest }) {
 
 /** Lists every tenant with all their stored information; the first seven columns edit in place. */
 export default function TenantsPage() {
+  const t = useT();
   const [tenants, setTenants] = useState(null); // null while loading
   const [error, setError] = useState('');
   const [showSsn, setShowSsn] = useState(false);
@@ -94,22 +97,22 @@ export default function TenantsPage() {
   }, []);
 
   // Saves one changed field; the whole record is validated in the main process.
-  async function saveField(t, field, value) {
-    const values = Object.fromEntries(FIELDS.map((f) => [f, t[f] ?? '']));
+  async function saveField(tn, field, value) {
+    const values = Object.fromEntries(FIELDS.map((f) => [f, tn[f] ?? '']));
     values[field] = value;
-    const res = await window.api.tenants.update(t.id, values);
+    const res = await window.api.tenants.update(tn.id, values);
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setError('');
-    setTenants((list) => list.map((x) => (x.id === t.id ? { ...x, ...res.data } : x)));
-    toast('Saved.');
+    setTenants((list) => list.map((x) => (x.id === tn.id ? { ...x, ...res.data } : x)));
+    toast(t('Saved.'));
   }
 
-  const cell = (t, field, label, props = {}) => (
+  const cell = (tn, field, label, props = {}) => (
     <td>
-      <EditCell field={field} value={t[field]} label={label} onCommit={(f, v) => saveField(t, f, v)} {...props} />
+      <EditCell field={field} value={tn[field]} label={t(label)} onCommit={(f, v) => saveField(tn, f, v)} {...props} />
     </td>
   );
 
@@ -118,44 +121,44 @@ export default function TenantsPage() {
       <div>
         {error && <p className="error">{error}</p>}
         <div className="section-head">
-          <h2>{tenants ? `${tenants.length} tenant${tenants.length === 1 ? '' : 's'}` : 'Loading…'}</h2>
-          <button onClick={() => setShowSsn((s) => !s)}>{showSsn ? 'Hide SSNs' : 'Show SSNs'}</button>
+          <h2>{tenants ? (tenants.length === 1 ? t('1 tenant') : t('{n} tenants', { n: tenants.length })) : t('Loading…')}</h2>
+          <button onClick={() => setShowSsn((s) => !s)}>{showSsn ? t('Hide SSNs') : t('Show SSNs')}</button>
         </div>
         {tenants && tenants.length === 0 && (
-          <p id="empty-msg">No tenants yet. Tenants are added from a property's lease.</p>
+          <p id="empty-msg">{t("No tenants yet. Tenants are added from a property's lease.")}</p>
         )}
         {tenants && tenants.length > 0 && (
           <table>
             <thead>
               <tr>
-                <th>First name</th>
-                <th>Last name</th>
-                <th>Gender</th>
-                <th>SSN</th>
-                <th>Date of birth</th>
-                <th>Phone</th>
-                <th>Email</th>
-                <th>Active lease</th>
+                <th>{t('First name')}</th>
+                <th>{t('Last name')}</th>
+                <th>{t('Gender')}</th>
+                <th>{t('SSN')}</th>
+                <th>{t('Date of birth')}</th>
+                <th>{t('Phone')}</th>
+                <th>{t('Email')}</th>
+                <th>{t('Active lease')}</th>
               </tr>
             </thead>
             <tbody>
-              {tenants.map((t) => (
-                <tr key={t.id}>
-                  {cell(t, 'firstName', 'First name', { type: 'text' })}
-                  {cell(t, 'lastName', 'Last name', { type: 'text' })}
-                  {cell(t, 'gender', 'Gender')}
-                  {cell(t, 'ssn', 'SSN', {
+              {tenants.map((tn) => (
+                <tr key={tn.id}>
+                  {cell(tn, 'firstName', 'First name', { type: 'text' })}
+                  {cell(tn, 'lastName', 'Last name', { type: 'text' })}
+                  {cell(tn, 'gender', 'Gender')}
+                  {cell(tn, 'ssn', 'SSN', {
                     type: 'text', maxLength: 11, inputMode: 'numeric', autoComplete: 'off',
                     display: showSsn ? undefined : maskSsn
                   })}
-                  {cell(t, 'dateOfBirth', 'Date of birth', { type: 'date' })}
-                  {cell(t, 'phone', 'Phone', { type: 'tel', maxLength: 14, placeholder: '—' })}
-                  {cell(t, 'email', 'Email', { type: 'email', placeholder: '—' })}
+                  {cell(tn, 'dateOfBirth', 'Date of birth', { type: 'date' })}
+                  {cell(tn, 'phone', 'Phone', { type: 'tel', maxLength: 14, placeholder: '—' })}
+                  {cell(tn, 'email', 'Email', { type: 'email', placeholder: '—' })}
                   <td>
-                    <button type="button" className="map-icon" onClick={() => setHistoryFor(t)}
-                      title="Leasing history" aria-label={`Leasing history of ${t.firstName} ${t.lastName}`}>🕘</button>
-                    {t.activeLease
-                      ? `${t.activeLease.address}, ${t.activeLease.city} (${usDate(t.activeLease.startDate)} to ${usDate(t.activeLease.endDate)})`
+                    <button type="button" className="map-icon" onClick={() => setHistoryFor(tn)}
+                      title={t('Leasing history')} aria-label={t('Leasing history of {name}', { name: `${tn.firstName} ${tn.lastName}` })}>🕘</button>
+                    {tn.activeLease
+                      ? `${tn.activeLease.address}, ${tn.activeLease.city} (${t('{start} to {end}', { start: usDate(tn.activeLease.startDate), end: usDate(tn.activeLease.endDate) })})`
                       : '—'}
                   </td>
                 </tr>

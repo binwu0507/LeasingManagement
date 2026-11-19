@@ -664,3 +664,79 @@ input.cell-edit:focus, select.cell-edit:focus {
 input.cell-edit::placeholder { color: var(--text-muted); opacity: 1; }
 select.cell-edit { appearance: none; cursor: pointer; }
 td:has(> .cell-edit) { padding-top: 6px; padding-bottom: 6px; }
+
+/* ==========================================================================
+   Header preferences (theme / language switches)
+   ========================================================================== */
+.prefs { display: flex; align-items: center; gap: 12px; }
+button.pref-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.8rem;
+}
+button.pref-switch:hover { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.4); }
+button.pref-switch:focus-visible { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.35); }
+.pref-switch span { padding: 3px 12px; border-radius: 999px; transition: background var(--transition), color var(--transition); }
+.pref-switch span.on { background: #fff; color: #14213d; font-weight: 600; }
+
+/* ==========================================================================
+   Dark theme — same tokens, different values
+   ========================================================================== */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --primary: #4f8cff;
+  --primary-hover: #6b9fff;
+  --primary-active: #8db5ff;
+  --primary-soft: #1c2c4d;
+  --primary-soft-border: #2f4a80;
+  --ring: rgba(79, 140, 255, 0.4);
+
+  --bg: #0f1420;
+  --surface: #171e2e;
+  --surface-alt: #1c2539;
+  --surface-head: #202b42;
+  --border: #2a3550;
+  --border-strong: #3a4766;
+  --text: #e6eaf2;
+  --text-muted: #9aa7bf;
+  --text-faint: #62708a;
+
+  --success: #4ade80;
+  --success-soft: #12301f;
+  --danger: #f87171;
+  --danger-soft: #3a1b1b;
+  --danger-border: #6e2b2b;
+
+  --header-from: #0a1020;
+  --header-to: #15264a;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.6);
+}
+:root[data-theme="dark"] button { box-shadow: none; }
+:root[data-theme="dark"] button:hover { border-color: #51608a; }
+:root[data-theme="dark"] button:active { background: #29365a; }
+:root[data-theme="dark"] button.primary { color: #0b1220; box-shadow: none; }
+:root[data-theme="dark"] button.primary:disabled { color: var(--text-faint); }
+:root[data-theme="dark"] button.btn-link,
+:root[data-theme="dark"] .tab { box-shadow: none; }
+:root[data-theme="dark"] .tab:hover { background: rgba(79, 140, 255, 0.1); }
+:root[data-theme="dark"] .year-picker select:hover:not(:disabled) { background-color: #25396a; }
+:root[data-theme="dark"] form input:hover,
+:root[data-theme="dark"] form select:hover { border-color: #51608a; }
+:root[data-theme="dark"] dialog { border-color: var(--border-strong); }
+:root[data-theme="dark"] dialog::backdrop { background: rgba(0, 0, 0, 0.65); }
+:root[data-theme="dark"] .toast { background: #26324f; border: 1px solid var(--border-strong); }
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #3a4766; background-clip: content-box; }
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #51608a; background-clip: content-box; }
+:root[data-theme="dark"] .map-dialog iframe { filter: invert(0.92) hue-rotate(180deg); }
+:root[data-theme="dark"] button.pref-switch { border-color: rgba(255, 255, 255, 0.2); }
+:root[data-theme="dark"] .pref-switch span.on { background: var(--primary); color: #0b1220; }

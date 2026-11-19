@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { usDate } from '../finance.js';
+import { useT } from '../i18n.jsx';
 
 // YYYY-MM-DD -> MM/DD/YYYY
 
@@ -8,6 +9,7 @@ import { usDate } from '../finance.js';
  * `houses` are all properties; `existing` are the year records already in this year.
  */
 export default function AddToYear({ year, houses, existing, onAdd, onCancel }) {
+  const t = useT();
   const dialogRef = useRef(null);
   const [selected, setSelected] = useState(new Set());
   const [error, setError] = useState('');
@@ -49,11 +51,10 @@ export default function AddToYear({ year, houses, existing, onAdd, onCancel }) {
   return (
     <dialog ref={dialogRef} className="add-to-year" onCancel={onCancel}>
       <form onSubmit={submit}>
-        <h2>Add properties to this year</h2>
+        <h2>{t('Add properties to this year')}</h2>
         {available.length === 0 ? (
           <p className="hint">
-            No properties available for {year}. Only properties with a purchase date in or before {year}
-            that aren't already in this year are listed. Add new properties or set purchase dates from the Home screen.
+            {t("No properties available for {year}. Only properties with a purchase date in or before {year} that aren't already in this year are listed. Add new properties or set purchase dates from the Home screen.", { year })}
           </p>
         ) : (
           <>
@@ -63,14 +64,14 @@ export default function AddToYear({ year, houses, existing, onAdd, onCancel }) {
                 checked={allSelected}
                 onChange={() => setSelected(allSelected ? new Set() : new Set(available.map((h) => h.id)))}
               />
-              <strong>Select all</strong>
+              <strong>{t('Select all')}</strong>
             </label>
             <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0', maxHeight: 260, overflow: 'auto' }}>
               {available.map((h) => (
                 <li key={h.id}>
                   <label>
                     <input type="checkbox" checked={selected.has(h.id)} onChange={() => toggle(h.id)} />
-                    <span>{h.address}, {h.city} (purchased {usDate(h.purchaseDate)})</span>
+                    <span>{t('{address}, {city} (purchased {date})', { address: h.address, city: h.city, date: usDate(h.purchaseDate) })}</span>
                   </label>
                 </li>
               ))}
@@ -81,9 +82,9 @@ export default function AddToYear({ year, houses, existing, onAdd, onCancel }) {
         {error && <p className="error">{error}</p>}
 
         <div className="actions">
-          <button type="button" onClick={onCancel}>Cancel</button>
+          <button type="button" onClick={onCancel}>{t('Cancel')}</button>
           <button type="submit" className="primary" disabled={selected.size === 0}>
-            Add {selected.size > 0 ? `(${selected.size})` : ''}
+            {selected.size > 0 ? t('Add ({n})', { n: selected.size }) : t('Add')}
           </button>
         </div>
       </form>

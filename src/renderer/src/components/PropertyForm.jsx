@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { money as formatMoney } from '../finance.js';
+import { useT } from '../i18n.jsx';
 
 const US_STATES = [
   ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
@@ -40,6 +41,7 @@ const toForm = (p) => ({
  * Rendered only while open, so state resets each time it is shown.
  */
 export default function PropertyForm({ property, onSave, onCancel, houseOnly = false }) {
+  const t = useT();
   const dialogRef = useRef(null);
   const [initial] = useState(() => (property ? toForm(property) : EMPTY));
   const [values, setValues] = useState(initial);
@@ -90,7 +92,7 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
 
   const field = (label, name, props = {}) => (
     <label>
-      {label}
+      {t(label)}
       <input name={name} value={values[name]} onChange={set} {...props} />
     </label>
   );
@@ -104,7 +106,7 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
         {yearOnly ? (
           <h2>{property.address}</h2>
         ) : (
-          <h2>{property ? 'Edit' : 'Add'} {houseOnly ? 'Property' : 'House'}</h2>
+          <h2>{t(`${property ? 'Edit' : 'Add'} ${houseOnly ? 'Property' : 'House'}`)}</h2>
         )}
 
         {!yearOnly && (
@@ -113,7 +115,7 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
             <div className="row">
               {field('City', 'city', { type: 'text', required: true })}
               <label>
-                State
+                {t('State')}
                 <select name="state" value={values.state} onChange={set}>
                   <option value="">—</option>
                   {/* keep a stored value that isn't in the list selectable so it isn't silently lost */}
@@ -145,23 +147,23 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
               {field('HOA fee ($/month)', 'hoaFee', money)}
               {field('Property tax ($/year)', 'propertyTax', money)}
             </div>
-            <p className="hint">Optional costs (leave blank if not applicable)</p>
+            <p className="hint">{t('Optional costs (leave blank if not applicable)')}</p>
             <div className="row">
               {field('Insurance ($/year)', 'insurance', money)}
               {field('Mortgage interest ($/year)', 'mortgageInterest', money)}
             </div>
 
             <fieldset className="repairs">
-              <legend>Total repair cost: {formatMoney.format(repairTotal)}</legend>
+              <legend>{t('Total repair cost: {total}', { total: formatMoney.format(repairTotal) })}</legend>
               {values.repairItems.length > 0 && (
                 <div className="repair-scroll">
                   <table className="repair-table">
                     <thead>
                       <tr>
-                        <th><button type="button" className="link" onClick={() => sortBy('date')}>Date{arrow('date')}</button></th>
-                        <th><button type="button" className="link" onClick={() => sortBy('amount')}>Amount ($){arrow('amount')}</button></th>
-                        <th>Contractor</th>
-                        <th>Description</th>
+                        <th><button type="button" className="link" onClick={() => sortBy('date')}>{t('Date')}{arrow('date')}</button></th>
+                        <th><button type="button" className="link" onClick={() => sortBy('amount')}>{t('Amount ($)')}{arrow('amount')}</button></th>
+                        <th>{t('Contractor')}</th>
+                        <th>{t('Description')}</th>
                         <th />
                       </tr>
                     </thead>
@@ -169,22 +171,22 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
                       {values.repairItems.map((it, i) => (
                         <tr key={i}>
                           <td><input type="date" name="date" value={it.date} onChange={(e) => setItem(i, e)}
-                            aria-label="Repair date" /></td>
+                            aria-label={t('Repair date')} /></td>
                           <td><input type="number" name="amount" min={0} step={0.01} value={it.amount}
-                            onChange={(e) => setItem(i, e)} aria-label="Repair amount" /></td>
+                            onChange={(e) => setItem(i, e)} aria-label={t('Repair amount')} /></td>
                           <td><input type="text" name="contractor" value={it.contractor}
-                            onChange={(e) => setItem(i, e)} aria-label="Contractor" /></td>
+                            onChange={(e) => setItem(i, e)} aria-label={t('Contractor')} /></td>
                           <td><input type="text" name="description" value={it.description}
-                            onChange={(e) => setItem(i, e)} aria-label="Repair description" /></td>
+                            onChange={(e) => setItem(i, e)} aria-label={t('Repair description')} /></td>
                           <td><button type="button" className="link" onClick={() => removeItem(i)}
-                            title="Remove item" aria-label="Remove repair item">✕</button></td>
+                            title={t('Remove item')} aria-label={t('Remove repair item')}>✕</button></td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               )}
-              <button type="button" onClick={addItem}>+ Add repair</button>
+              <button type="button" onClick={addItem}>{t('+ Add repair')}</button>
             </fieldset>
           </>
         )}
@@ -192,8 +194,8 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
         {error && <p className="error">{error}</p>}
 
         <div className="actions">
-          <button type="button" onClick={onCancel}>{houseOnly && property ? 'Close' : 'Cancel'}</button>
-          <button type="submit" className="primary" disabled={houseOnly && !dirty}>Save</button>
+          <button type="button" onClick={onCancel}>{houseOnly && property ? t('Close') : t('Cancel')}</button>
+          <button type="submit" className="primary" disabled={houseOnly && !dirty}>{t('Save')}</button>
         </div>
       </form>
     </dialog>

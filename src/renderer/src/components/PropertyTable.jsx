@@ -1,10 +1,12 @@
 import { Fragment, useState } from 'react';
 import PropertyRow from './PropertyRow.jsx';
 import { MONEY_COLUMNS, money, annualTotals, netIncome } from '../finance.js';
+import { useT } from '../i18n.jsx';
 
 const SORT_VALUE = { net: netIncome };
 
 export default function PropertyTable({ properties, onEdit, onDelete }) {
+  const t = useT();
   const [sort, setSort] = useState({ key: null, dir: 1 });
 
   // asc -> desc -> original order
@@ -14,12 +16,12 @@ export default function PropertyTable({ properties, onEdit, onDelete }) {
   const ariaSort = (key) => (sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none');
   const header = (key, label) => (
     <th className="num sortable" aria-sort={ariaSort(key)}>
-      <button type="button" className="link" onClick={() => toggleSort(key)}>{label}{arrow(key)}</button>
+      <button type="button" className="link" onClick={() => toggleSort(key)}>{t(label)}{arrow(key)}</button>
     </th>
   );
 
   if (properties.length === 0) {
-    return <p id="empty-msg">No properties yet. Click "Add Property…" to add one to this year.</p>;
+    return <p id="empty-msg">{t('No properties yet. Click "Add Property…" to add one to this year.')}</p>;
   }
 
   const totals = annualTotals(properties);
@@ -40,10 +42,10 @@ export default function PropertyTable({ properties, onEdit, onDelete }) {
     <table>
       <thead>
         <tr>
-          <th>Address</th>
+          <th>{t('Address')}</th>
           {MONEY_COLUMNS.map((col) => <Fragment key={col.field}>{header(col.field, col.header)}</Fragment>)}
           {header('net', 'Net / yr')}
-          <th>Actions</th>
+          <th>{t('Actions')}</th>
         </tr>
       </thead>
       <tbody>
@@ -53,7 +55,7 @@ export default function PropertyTable({ properties, onEdit, onDelete }) {
       </tbody>
       <tfoot>
         <tr>
-          <td>Annual totals</td>
+          <td>{t('Annual totals')}</td>
           {MONEY_COLUMNS.map((col) => (
             <td key={col.field} className="num">{money.format(totals[col.field])}</td>
           ))}

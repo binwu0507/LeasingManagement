@@ -3,6 +3,7 @@ import MapDialog from './MapDialog.jsx';
 import ManageLeaseDialog from './ManageLeaseDialog.jsx';
 import TenantsPage from './TenantsPage.jsx';
 import { usDate } from '../finance.js';
+import { useT, usePrefs } from '../i18n.jsx';
 
 /**
  * Home page: lists every property (no yearly figures) with a year selector
@@ -10,6 +11,8 @@ import { usDate } from '../finance.js';
  * `onAddYear` returns an error message, or nothing on success.
  */
 export default function YearSelect({ years, properties, onSelect, onAddYear, onEdit, tab, onTab, yearView }) {
+  const t = useT();
+  const { lang, theme, toggleLang, toggleTheme } = usePrefs();
   const [newYear, setNewYear] = useState(String(new Date().getFullYear()));
   const [error, setError] = useState('');
   const [mapFor, setMapFor] = useState(null); // property whose map is open
@@ -47,7 +50,19 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
   return (
     <>
       <header>
-        <h1>Leasing Management</h1>
+        <h1>{t('Leasing Management')}</h1>
+        <div className="prefs">
+          <button type="button" className="pref-switch" role="switch" aria-checked={theme === 'dark'}
+            onClick={toggleTheme} title={theme === 'dark' ? t('Switch to light mode') : t('Switch to dark mode')}>
+            <span className={theme === 'light' ? 'on' : ''}>☀ {t('Light')}</span>
+            <span className={theme === 'dark' ? 'on' : ''}>☾ {t('Dark')}</span>
+          </button>
+          <button type="button" className="pref-switch" role="switch" aria-checked={lang === 'zh'}
+            onClick={toggleLang} title={lang === 'zh' ? t('Switch to English') : t('Switch to Chinese')}>
+            <span className={lang === 'en' ? 'on' : ''}>EN</span>
+            <span className={lang === 'zh' ? 'on' : ''}>中文</span>
+          </button>
+        </div>
       </header>
 
       <main>
@@ -61,16 +76,16 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
               className={tab === name ? 'tab active' : 'tab'}
               onClick={() => onTab(name)}
             >
-              {name}
+              {t(name)}
             </button>
           ))}
         </div>
         {tab === 'Tenants' ? <TenantsPage /> : tab === 'Admin' ? (
           <section>
-            <h2>Years</h2>
-            <p className="hint">Years already added:</p>
+            <h2>{t('Years')}</h2>
+            <p className="hint">{t('Years already added:')}</p>
             {years.length === 0 ? (
-              <p className="hint">No years yet.</p>
+              <p className="hint">{t('No years yet.')}</p>
             ) : (
               <ul className="year-list">
                 {years.map((y) => <li key={y}>{y}</li>)}
@@ -78,7 +93,7 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
             )}
             <form onSubmit={add} className="year-add">
               <label>
-                Add a year
+                {t('Add a year')}
                 <input
                   type="number"
                   min="1900"
@@ -88,49 +103,49 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                   onChange={(e) => setNewYear(e.target.value)}
                 />
               </label>
-              <button type="submit" disabled={exists} title={exists ? `${newYear} is already added` : ''}>Add year</button>
+              <button type="submit" disabled={exists} title={exists ? t('{year} is already added', { year: newYear }) : ''}>{t('Add year')}</button>
             </form>
             {error && <p className="error">{error}</p>}
           </section>
           ) : yearView ? yearView : <>
         <div className="section-head">
           <div className="year-title">
-            <h2>Properties Overview</h2>
+            <h2>{t('Properties Overview')}</h2>
             <label className="year-picker">
               <select
-                aria-label="Select a year"
+                aria-label={t('Select a year')}
                 value=""
                 onChange={(e) => e.target.value && onSelect(Number(e.target.value))}
                 disabled={years.length === 0}
               >
-                <option value="">{years.length ? 'Select a year' : 'No years yet'}</option>
+                <option value="">{years.length ? t('Select a year') : t('No years yet')}</option>
                 {years.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
             </label>
           </div>
           <div className="header-actions" style={{ margin: 0 }}>
-            <button className="primary" onClick={() => onEdit(null)}>+ Add Property</button>
+            <button className="primary" onClick={() => onEdit(null)}>{t('+ Add Property')}</button>
           </div>
         </div>
         {properties.length === 0 ? (
-          <p id="empty-msg">No properties yet. Click "Add Property" to create one.</p>
+          <p id="empty-msg">{t('No properties yet. Click "Add Property" to create one.')}</p>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>Address</th>
-                <th>City</th>
-                <th>State</th>
-                <th>Zip</th>
-                <th className="num">Beds</th>
-                <th className="num">Baths</th>
+                <th>{t('Address')}</th>
+                <th>{t('City')}</th>
+                <th>{t('State')}</th>
+                <th>{t('Zip')}</th>
+                <th className="num">{t('Beds')}</th>
+                <th className="num">{t('Baths')}</th>
                 <th className="num sortable" aria-sort={ariaSort('sqft')}>
-                  <button type="button" className="link" onClick={() => toggleSort('sqft')}>Sq ft{arrow('sqft')}</button>
+                  <button type="button" className="link" onClick={() => toggleSort('sqft')}>{t('Sq ft')}{arrow('sqft')}</button>
                 </th>
                 <th className="sortable" aria-sort={ariaSort('purchaseDate')}>
-                  <button type="button" className="link" onClick={() => toggleSort('purchaseDate')}>Purchase Date{arrow('purchaseDate')}</button>
+                  <button type="button" className="link" onClick={() => toggleSort('purchaseDate')}>{t('Purchase Date')}{arrow('purchaseDate')}</button>
                 </th>
-                <th>Actions</th>
+                <th>{t('Actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -141,8 +156,8 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                       type="button"
                       className="map-icon"
                       onClick={() => setMapFor(p)}
-                      title="Show on map"
-                      aria-label={`Show ${p.address} on map`}
+                      title={t('Show on map')}
+                      aria-label={t('Show {address} on map', { address: p.address })}
                     >
                       📍
                     </button>
@@ -156,8 +171,8 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                   <td className="num">{p.sqft}</td>
                   <td>{usDate(p.purchaseDate)}</td>
                   <td className="row-actions">
-                    <button onClick={() => onEdit(p)}>Edit</button>
-                    <button onClick={() => setLeasesFor(p)}>Manage Lease</button>
+                    <button onClick={() => onEdit(p)}>{t('Edit')}</button>
+                    <button onClick={() => setLeasesFor(p)}>{t('Manage Lease')}</button>
                   </td>
                 </tr>
               ))}

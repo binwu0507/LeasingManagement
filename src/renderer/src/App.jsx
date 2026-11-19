@@ -7,8 +7,10 @@ import AddToYear from './components/AddToYear.jsx';
 import YearSelect from './components/YearSelect.jsx';
 import Toaster from './components/Toaster.jsx';
 import { toast } from './toast.js';
+import { useT } from './i18n.jsx';
 
 export default function App() {
+  const t = useT();
   const [years, setYears] = useState([]);
   const [year, setYear] = useState(null); // null = start screen, nothing chosen yet
   const [properties, setProperties] = useState([]); // records of the selected year
@@ -66,7 +68,7 @@ export default function App() {
       return res.error;
     }
     await loadYears();
-    toast(`Year ${res.data} added.`);
+    toast(t('Year {year} added.', { year: res.data }));
   }
 
   // Returns an error message to show in the form, or nothing on success
@@ -77,7 +79,7 @@ export default function App() {
     }
     setEditing(undefined);
     refresh();
-    toast('Saved.');
+    toast(t('Saved.'));
   }
 
   async function addToYear(propertyIds) {
@@ -99,7 +101,7 @@ export default function App() {
   }
 
   async function remove(p) {
-    if (!confirm(`Delete ${p.address}, ${p.city}?`)) {
+    if (!confirm(t('Delete {address}, {city}?', { address: p.address, city: p.city }))) {
       return;
     }
     const res = await window.api.properties.remove(p.id);
@@ -123,26 +125,26 @@ export default function App() {
     }
     setEditingHouse(undefined);
     loadAll();
-    toast('Property saved.');
+    toast(t('Property saved.'));
   }
 
   // The selected year's records, shown inside the Properties tab
   const yearView = year === null ? null : (
     <>
       <nav className="breadcrumb">
-        <button type="button" className="btn-link" onClick={() => setYear(null)}>← Properties Overview</button>
+        <button type="button" className="btn-link" onClick={() => setYear(null)}>{t('← Properties Overview')}</button>
       </nav>
       <div className="section-head">
         <div className="year-title">
-          <h2>Properties {year}</h2>
+          <h2>{t('Properties {year}', { year })}</h2>
           <label className="year-picker">
             <select
-              aria-label="Select another year"
+              aria-label={t('Select another year')}
               value=""
               onChange={(e) => e.target.value && setYear(Number(e.target.value))}
               disabled={years.length < 2}
             >
-              <option value="">Select another year</option>
+              <option value="">{t('Select another year')}</option>
               {years.filter((y) => y !== year).map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </label>
@@ -151,11 +153,11 @@ export default function App() {
           <button
             onClick={() => setCopying(true)}
             disabled={years.length < 2}
-            title={years.length < 2 ? 'No other year to copy from' : ''}
+            title={years.length < 2 ? t('No other year to copy from') : ''}
           >
-            Copy from year…
+            {t('Copy from year…')}
           </button>
-          <button className="primary" onClick={() => { loadAll(); setAdding(true); }}>+ Add Property…</button>
+          <button className="primary" onClick={() => { loadAll(); setAdding(true); }}>{t('+ Add Property…')}</button>
         </div>
       </div>
       <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} />

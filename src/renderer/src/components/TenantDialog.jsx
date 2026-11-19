@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useT } from '../i18n.jsx';
 
 // Input masks: keep only digits and lay them out as typed.
 const digits = (s, max) => s.replace(/\D/g, '').slice(0, max);
@@ -22,6 +23,7 @@ const EMPTY = { firstName: '', lastName: '', gender: '', ssn: '', dateOfBirth: '
  * Rendered in a portal so its form is not nested inside the property form.
  */
 export default function TenantDialog({ onAdded, onCancel }) {
+  const tr = useT();
   const dialogRef = useRef(null);
   const [values, setValues] = useState(EMPTY);
   const [error, setError] = useState('');
@@ -66,7 +68,7 @@ export default function TenantDialog({ onAdded, onCancel }) {
 
   const field = (label, name, props = {}) => (
     <label>
-      {label}
+      {tr(label)}
       <input name={name} value={values[name]} onChange={set} {...props} />
     </label>
   );
@@ -75,11 +77,13 @@ export default function TenantDialog({ onAdded, onCancel }) {
     <dialog ref={dialogRef} onCancel={onCancel} onClick={(e) => e.stopPropagation()}>
       {matches ? (
         <div>
-          <h2>Existing tenant?</h2>
+          <h2>{tr('Existing tenant?')}</h2>
           <p>
-            The {[...new Set(matches.flatMap((m) => m.matchedOn))].join(', ')} you entered matches
-            {matches.length > 1 ? ' these tenants' : ' this tenant'} already in the database.
-            Are you adding an existing person?
+            {tr('The {fields} you entered matches {these} already in the database.', {
+              fields: [...new Set(matches.flatMap((m) => m.matchedOn))].map((x) => tr(x)).join(', '),
+              these: matches.length > 1 ? tr('these tenants') : tr('this tenant')
+            })}{' '}
+            {tr('Are you adding an existing person?')}
           </p>
           <ul className="tenant-matches">
             {matches.map((m) => (
@@ -87,35 +91,35 @@ export default function TenantDialog({ onAdded, onCancel }) {
                 <div>
                   <strong>{m.firstName} {m.lastName}</strong> <span className="hint">(···{m.ssn.slice(-4)})</span>
                   <div className="hint">
-                    {[m.phone, m.email].filter(Boolean).join(' · ') || 'No phone or email'} — matches on {m.matchedOn.join(', ')}
+                    {[m.phone, m.email].filter(Boolean).join(' · ') || tr('No phone or email')} — {tr('matches on {fields}', { fields: m.matchedOn.map((x) => tr(x)).join(', ') })}
                   </div>
                 </div>
-                <button type="button" className="primary" onClick={() => onAdded(m)}>Yes, use this person</button>
+                <button type="button" className="primary" onClick={() => onAdded(m)}>{tr('Yes, use this person')}</button>
               </li>
             ))}
           </ul>
-          {ssnTaken && <p className="hint">The SSN is already in use, so it can't be added as a new person.</p>}
+          {ssnTaken && <p className="hint">{tr("The SSN is already in use, so it can't be added as a new person.")}</p>}
           {error && <p className="error">{error}</p>}
           <div className="actions">
-            <button type="button" onClick={() => setMatches(null)}>Back</button>
-            <button type="button" onClick={create} disabled={ssnTaken}>No, add as a new person</button>
+            <button type="button" onClick={() => setMatches(null)}>{tr('Back')}</button>
+            <button type="button" onClick={create} disabled={ssnTaken}>{tr('No, add as a new person')}</button>
           </div>
         </div>
       ) : (
       <form onSubmit={submit} noValidate>
-        <h2>Add Tenant</h2>
+        <h2>{tr('Add Tenant')}</h2>
         <div className="row">
           {field('First name', 'firstName', { type: 'text', required: true })}
           {field('Last name', 'lastName', { type: 'text', required: true })}
         </div>
         <div className="row">
           <label>
-            Gender
+            {tr('Gender')}
             <select name="gender" value={values.gender} onChange={set}>
               <option value="">—</option>
-              <option>Male</option>
-              <option>Female</option>
-              <option>Other</option>
+              <option value="Male">{tr('Male')}</option>
+              <option value="Female">{tr('Female')}</option>
+              <option value="Other">{tr('Other')}</option>
             </select>
           </label>
           {field('Date of birth', 'dateOfBirth', { type: 'date' })}
@@ -133,8 +137,8 @@ export default function TenantDialog({ onAdded, onCancel }) {
         {field('Email', 'email', { type: 'email' })}
         {error && <p className="error">{error}</p>}
         <div className="actions">
-          <button type="button" onClick={onCancel}>Cancel</button>
-          <button type="submit" className="primary">Save tenant</button>
+          <button type="button" onClick={onCancel}>{tr('Cancel')}</button>
+          <button type="submit" className="primary">{tr('Save tenant')}</button>
         </div>
       </form>
       )}

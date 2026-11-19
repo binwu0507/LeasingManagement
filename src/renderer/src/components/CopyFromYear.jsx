@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { usDate } from '../finance.js';
+import { useT } from '../i18n.jsx';
 
 /**
  * Dialog to copy houses (without any monetary values) from another year.
@@ -9,6 +10,7 @@ import { usDate } from '../finance.js';
 // YYYY-MM-DD -> MM/DD/YYYY
 
 export default function CopyFromYear({ year, years, existing, onCopy, onCancel }) {
+  const t = useT();
   const dialogRef = useRef(null);
   const [source, setSource] = useState(years[0] ?? '');
   const [houses, setHouses] = useState([]);
@@ -75,17 +77,17 @@ export default function CopyFromYear({ year, years, existing, onCopy, onCancel }
   return (
     <dialog ref={dialogRef} className="add-to-year" onCancel={onCancel}>
       <form onSubmit={submit}>
-        <h2>Copy houses from another year</h2>
+        <h2>{t('Copy houses from another year')}</h2>
         <label className="source">
-          Copy from
+          {t('Copy from')}
           <select value={source} onChange={(e) => { setError(''); setSource(Number(e.target.value)); }}>
             {years.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
         </label>
-        <p className="hint">Only address and property details are copied, not rent, costs or other amounts.</p>
+        <p className="hint">{t('Only address and property details are copied, not rent, costs or other amounts.')}</p>
 
         {houses.length === 0 ? (
-          <p className="hint">No houses in {source}.</p>
+          <p className="hint">{t('No houses in {year}.', { year: source })}</p>
         ) : (
           <>
             <label>
@@ -95,7 +97,7 @@ export default function CopyFromYear({ year, years, existing, onCopy, onCancel }
                 disabled={available.length === 0}
                 onChange={() => setSelected(allSelected ? new Set() : new Set(available.map((p) => p.id)))}
               />
-              <strong>Select all</strong>
+              <strong>{t('Select all')}</strong>
             </label>
             <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0', maxHeight: 260, overflowY: 'auto' }}>
               {houses.map((p) => {
@@ -111,8 +113,8 @@ export default function CopyFromYear({ year, years, existing, onCopy, onCancel }
                         onChange={() => toggle(p.id)}
                       />
                       <span>
-                        {p.address}, {p.city} (purchased {p.purchaseDate ? usDate(p.purchaseDate) : 'date unknown'})
-                        {dup ? ' - already in this year' : late ? ` - not available for ${year}` : ''}
+                        {t('{address}, {city} (purchased {date})', { address: p.address, city: p.city, date: p.purchaseDate ? usDate(p.purchaseDate) : t('date unknown') })}
+                        {dup ? t(' - already in this year') : late ? t(' - not available for {year}', { year }) : ''}
                       </span>
                     </label>
                   </li>
@@ -125,9 +127,9 @@ export default function CopyFromYear({ year, years, existing, onCopy, onCancel }
         {error && <p className="error">{error}</p>}
 
         <div className="actions">
-          <button type="button" onClick={onCancel}>Cancel</button>
+          <button type="button" onClick={onCancel}>{t('Cancel')}</button>
           <button type="submit" className="primary" disabled={selected.size === 0}>
-            Copy {selected.size > 0 ? `(${selected.size})` : ''}
+            {selected.size > 0 ? t('Copy ({n})', { n: selected.size }) : t('Copy')}
           </button>
         </div>
       </form>
