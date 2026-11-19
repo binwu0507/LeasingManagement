@@ -2,6 +2,7 @@ import { useState } from 'react';
 import MapDialog from './MapDialog.jsx';
 import ManageLeaseDialog from './ManageLeaseDialog.jsx';
 import TenantsPage from './TenantsPage.jsx';
+import { usDate } from '../finance.js';
 
 /**
  * Home page: lists every property (no yearly figures) with a year selector
@@ -13,6 +14,27 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
   const [error, setError] = useState('');
   const [mapFor, setMapFor] = useState(null); // property whose map is open
   const [leasesFor, setLeasesFor] = useState(null); // property whose leases are being managed
+
+  const [sort, setSort] = useState({ key: null, dir: 1 }); // key: 'sqft' | 'purchaseDate'
+
+  // asc -> desc -> unsorted
+  function toggleSort(key) {
+    setSort((s) => (s.key !== key ? { key, dir: 1 } : s.dir === 1 ? { key, dir: -1 } : { key: null, dir: 1 }));
+  }
+  const arrow = (key) => (sort.key === key ? (sort.dir === 1 ? ' ▲' : ' ▼') : '');
+  const ariaSort = (key) => (sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none');
+
+  const shown = sort.key
+    ? [...properties].sort((a, b) => {
+        const x = a[sort.key], y = b[sort.key];
+        const blankX = x === '' || x == null, blankY = y === '' || y == null;
+        if (blankX || blankY) {
+          return blankX === blankY ? 0 : blankX ? 1 : -1; // blanks always last
+        }
+        const c = sort.key === 'sqft' ? Number(x) - Number(y) : String(x).localeCompare(String(y));
+        return c * sort.dir;
+      })
+    : properties;
 
   const exists = years.includes(Number(newYear));
 
@@ -102,13 +124,17 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                 <th>Zip</th>
                 <th className="num">Beds</th>
                 <th className="num">Baths</th>
-                <th className="num">Sq ft</th>
-                <th>Purchase Date</th>
+                <th className="num sortable" aria-sort={ariaSort('sqft')}>
+                  <button type="button" className="link" onClick={() => toggleSort('sqft')}>Sq ft{arrow('sqft')}</button>
+                </th>
+                <th className="sortable" aria-sort={ariaSort('purchaseDate')}>
+                  <button type="button" className="link" onClick={() => toggleSort('purchaseDate')}>Purchase Date{arrow('purchaseDate')}</button>
+                </th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {properties.map((p) => (
+              {shown.map((p) => (
                 <tr key={p.id}>
                   <td>
                     <button
@@ -128,7 +154,7 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                   <td className="num">{p.bedrooms}</td>
                   <td className="num">{p.bathrooms}</td>
                   <td className="num">{p.sqft}</td>
-                  <td>{p.purchaseDate}</td>
+                  <td>{usDate(p.purchaseDate)}</td>
                   <td className="row-actions">
                     <button onClick={() => onEdit(p)}>Edit</button>
                     <button onClick={() => setLeasesFor(p)}>Manage Lease</button>

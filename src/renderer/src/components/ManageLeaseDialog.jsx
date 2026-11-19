@@ -152,7 +152,7 @@ export default function ManageLeaseDialog({ property, onClose }) {
     return err;
   };
   const removeLease = async (l) => {
-    if (!confirm(`Delete the lease ${l.startDate} to ${l.endDate}?`)) {
+    if (!confirm(`Delete the lease ${usDate(l.startDate)} to ${usDate(l.endDate)}?`)) {
       return;
     }
     const res = await window.api.leases.remove(l.id);

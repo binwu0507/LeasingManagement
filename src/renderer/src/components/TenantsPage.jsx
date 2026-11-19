@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import LeaseHistoryDialog from './LeaseHistoryDialog.jsx';
+import { usDate } from '../finance.js';
 
 const maskSsn = (ssn) => `***-**-${ssn.slice(-4)}`;
 
@@ -52,14 +53,14 @@ export default function TenantsPage() {
                   <td>{t.lastName}</td>
                   <td>{t.gender || '—'}</td>
                   <td>{showSsn ? t.ssn : maskSsn(t.ssn)}</td>
-                  <td>{t.dateOfBirth || '—'}</td>
+                  <td>{usDate(t.dateOfBirth) || '—'}</td>
                   <td>{t.phone || '—'}</td>
                   <td>{t.email || '—'}</td>
                   <td>
                     <button type="button" className="map-icon" onClick={() => setHistoryFor(t)}
                       title="Leasing history" aria-label={`Leasing history of ${t.firstName} ${t.lastName}`}>🕘</button>
                     {t.activeLease
-                      ? `${t.activeLease.address}, ${t.activeLease.city} (${t.activeLease.startDate} to ${t.activeLease.endDate})`
+                      ? `${t.activeLease.address}, ${t.activeLease.city} (${usDate(t.activeLease.startDate)} to ${usDate(t.activeLease.endDate)})`
                       : '—'}
                   </td>
                 </tr>

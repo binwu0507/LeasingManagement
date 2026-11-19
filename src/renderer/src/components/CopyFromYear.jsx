@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { usDate } from '../finance.js';
 
 /**
  * Dialog to copy houses (without any monetary values) from another year.
@@ -6,7 +7,6 @@ import { useEffect, useRef, useState } from 'react';
  * in the current year (used to flag duplicates).
  */
 // YYYY-MM-DD -> MM/DD/YYYY
-const usDate = (iso) => iso.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$2/$3/$1');
 
 export default function CopyFromYear({ year, years, existing, onCopy, onCancel }) {
   const dialogRef = useRef(null);
