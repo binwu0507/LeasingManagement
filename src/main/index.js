@@ -38,6 +38,7 @@ ipcMain.handle('leases:add', (event, propertyId, data) => respond(() => store.ad
 ipcMain.handle('leases:update', (event, id, data) => respond(() => store.updateLease(id, data)));
 ipcMain.handle('leases:delete', (event, id) => respond(() => store.deleteLease(id)));
 ipcMain.handle('tenants:list', () => respond(() => store.listTenants()));
+ipcMain.handle('tenants:history', (event, id) => respond(() => store.tenantLeaseHistory(id)));
 ipcMain.handle('tenants:matches', (event, data) => respond(() => store.findTenantMatches(data)));
 ipcMain.handle('tenants:add', (event, data) => respond(() => store.addTenant(data)));
 ipcMain.handle('properties:listAll', () => respond(() => store.listProperties()));

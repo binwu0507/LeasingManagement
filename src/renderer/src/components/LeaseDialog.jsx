@@ -26,6 +26,12 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
     tenants: d.tenants.map((t) => (t.tenantId === tenantId ? { ...t, occupying: !t.occupying } : t))
   }));
 
+  // Removes the tenant from this lease only (the tenant record stays); a stale save error is cleared.
+  const removeTenant = (tenantId) => {
+    setDraft((d) => ({ ...d, tenants: d.tenants.filter((t) => t.tenantId !== tenantId) }));
+    setError('');
+  };
+
   // The tenant (new, or an existing person the user confirmed) is linked to this lease, occupying.
   const tenantAdded = (tenant) => {
     onTenantCreated(tenant);
@@ -82,10 +88,14 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
           {draft.tenants.map((t) => {
             const info = tenants.find((x) => x.id === t.tenantId);
             return info && (
-              <label key={t.tenantId}>
-                <input type="checkbox" checked={t.occupying} onChange={() => toggleTenant(t.tenantId)} />
-                {info.firstName} {info.lastName} <span className="hint">(···{info.ssn.slice(-4)})</span>
-              </label>
+              <div key={t.tenantId} className="tenant-line">
+                <label>
+                  <input type="checkbox" checked={t.occupying} onChange={() => toggleTenant(t.tenantId)} />
+                  {info.firstName} {info.lastName} <span className="hint">(···{info.ssn.slice(-4)})</span>
+                </label>
+                <button type="button" className="link" onClick={() => removeTenant(t.tenantId)}
+                  title="Remove from this lease" aria-label={`Remove ${info.firstName} ${info.lastName} from this lease`}>✕</button>
+              </div>
             );
           })}
           <button type="button" onClick={() => setAddingTenant(true)}>+ Add tenant</button>

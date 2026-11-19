@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import LeaseHistoryDialog from './LeaseHistoryDialog.jsx';
 
 const maskSsn = (ssn) => `***-**-${ssn.slice(-4)}`;
 
@@ -7,6 +8,7 @@ export default function TenantsPage({ onBack }) {
   const [tenants, setTenants] = useState(null); // null while loading
   const [error, setError] = useState('');
   const [showSsn, setShowSsn] = useState(false);
+  const [historyFor, setHistoryFor] = useState(null); // tenant whose lease history is open
 
   useEffect(() => {
     window.api.tenants.list().then((res) => {
@@ -44,6 +46,7 @@ export default function TenantsPage({ onBack }) {
                 <th>Date of birth</th>
                 <th>Phone</th>
                 <th>Email</th>
+                <th>Active lease</th>
               </tr>
             </thead>
             <tbody>
@@ -56,12 +59,20 @@ export default function TenantsPage({ onBack }) {
                   <td>{t.dateOfBirth || '—'}</td>
                   <td>{t.phone || '—'}</td>
                   <td>{t.email || '—'}</td>
+                  <td>
+                    <button type="button" className="map-icon" onClick={() => setHistoryFor(t)}
+                      title="Leasing history" aria-label={`Leasing history of ${t.firstName} ${t.lastName}`}>🕘</button>
+                    {t.activeLease
+                      ? `${t.activeLease.address}, ${t.activeLease.city} (${t.activeLease.startDate} to ${t.activeLease.endDate})`
+                      : '—'}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </main>
+      {historyFor && <LeaseHistoryDialog tenant={historyFor} onClose={() => setHistoryFor(null)} />}
     </>
   );
 }

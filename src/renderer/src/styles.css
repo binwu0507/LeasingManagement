@@ -132,6 +132,7 @@ dialog:has(.leases) { width: 860px; }
 .renew-tenants { border: 1px solid #d5d9df; border-radius: 8px; margin: 0 0 12px; padding: 6px 10px; }
 .renew-tenants legend { font-weight: 600; color: #1f2733; padding: 0 6px; }
 .renew-tenants label { display: flex; flex-direction: row; align-items: center; gap: 6px; font-weight: 400; margin: 2px 0; }
+.tenant-line { display: flex; align-items: center; justify-content: space-between; }
 .renew-tenants input[type="checkbox"] { width: auto; margin: 0; }
 .lease-table th:nth-child(n), .lease-table td:nth-child(n) { width: auto; }
 .lease-table th:nth-child(1), .lease-table td:nth-child(1),
@@ -163,5 +164,8 @@ button.nav-link:hover { background: none; color: #1d4fd0; }
 dialog.map-dialog { width: 760px; }
 .map-dialog h2 { font-size: 1.05rem; }
 .map-dialog iframe { display: block; width: 100%; height: 440px; border: 1px solid #d5d9df; border-radius: 8px; }
+dialog.history-dialog { width: min(1100px, 95vw); max-width: 95vw; }
+.history-dialog td, .history-dialog th { white-space: nowrap; }
+.history-dialog h2 { font-size: 1.05rem; }
 .map-icon { background: none; border: none; padding: 0 6px 0 0; font-size: 1rem; line-height: 1; cursor: pointer; }
 .map-icon:hover { filter: brightness(0.85); }

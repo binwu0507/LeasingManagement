@@ -388,9 +388,44 @@ function validateTenant(data) {
   return clean;
 }
 
+// Each tenant, with `activeLease` ({ address, city, startDate, endDate } or null): the lease
+// linked to them whose term (inclusive) contains today.
+// Every lease a tenant is linked to (newest first), with the property address and the names
+// of all tenants on each lease.
+function tenantLeaseHistory(tenantId) {
+  const names = db.prepare(`
+    SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
+    WHERE lt.leaseId = ? ORDER BY lower(t.lastName), lower(t.firstName), t.id
+  `);
+  return db.prepare(`
+    SELECT l.id, l.startDate, l.endDate, l.monthlyRent, p.address, p.city
+    FROM lease_tenants lt
+    JOIN leases l ON l.id = lt.leaseId
+    JOIN properties p ON p.id = l.propertyId
+    WHERE lt.tenantId = ?
+    ORDER BY l.startDate DESC, l.id DESC
+  `).all(tenantId).map((l) => ({
+    ...toPlain(l),
+    tenantNames: names.all(l.id).map((n) => `${n.firstName} ${n.lastName}`)
+  }));
+}
+
 function listTenants() {
+  const t = new Date();
+  const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  const active = db.prepare(`
+    SELECT p.address, p.city, l.startDate, l.endDate
+    FROM lease_tenants lt
+    JOIN leases l ON l.id = lt.leaseId
+    JOIN properties p ON p.id = l.propertyId
+    WHERE lt.tenantId = ? AND l.startDate <= ? AND l.endDate >= ?
+    ORDER BY l.startDate DESC LIMIT 1
+  `);
   return db.prepare(`SELECT id, ${TENANT_FIELDS.join(', ')} FROM tenants ORDER BY lower(lastName), lower(firstName), id`)
-    .all().map(toPlain);
+    .all().map((r) => {
+      const lease = active.get(r.id, today, today);
+      return { ...toPlain(r), activeLease: lease ? toPlain(lease) : null };
+    });
 }
 
 // Existing tenants sharing the given SSN, phone or email (formatting ignored), each with the
@@ -896,4 +931,4 @@ function copyFromYear(targetValue, sourceValue, ids) {
   return copied;
 }
 
-module.exports = { init, close, listLeases, addLease, updateLease, deleteLease, listTenants, findTenantMatches, addTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+module.exports = { init, close, listLeases, addLease, updateLease, deleteLease, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
