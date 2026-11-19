@@ -4,7 +4,7 @@ import LeaseHistoryDialog from './LeaseHistoryDialog.jsx';
 const maskSsn = (ssn) => `***-**-${ssn.slice(-4)}`;
 
 /** Lists every tenant with all their stored information. SSNs are masked unless revealed. */
-export default function TenantsPage({ onBack }) {
+export default function TenantsPage() {
   const [tenants, setTenants] = useState(null); // null while loading
   const [error, setError] = useState('');
   const [showSsn, setShowSsn] = useState(false);
@@ -22,11 +22,7 @@ export default function TenantsPage({ onBack }) {
 
   return (
     <>
-      <header>
-        <button onClick={onBack}>← Home</button>
-        <h1>Tenants</h1>
-      </header>
-      <main>
+      <div>
         {error && <p className="error">{error}</p>}
         <div className="section-head">
           <h2>{tenants ? `${tenants.length} tenant${tenants.length === 1 ? '' : 's'}` : 'Loading…'}</h2>
@@ -71,7 +67,7 @@ export default function TenantsPage({ onBack }) {
             </tbody>
           </table>
         )}
-      </main>
+      </div>
       {historyFor && <LeaseHistoryDialog tenant={historyFor} onClose={() => setHistoryFor(null)} />}
     </>
   );

@@ -6,7 +6,6 @@ import CopyFromYear from './components/CopyFromYear.jsx';
 import AddToYear from './components/AddToYear.jsx';
 import YearSelect from './components/YearSelect.jsx';
 import Toaster from './components/Toaster.jsx';
-import TenantsPage from './components/TenantsPage.jsx';
 import { toast } from './toast.js';
 
 export default function App() {
@@ -18,7 +17,7 @@ export default function App() {
   const [editing, setEditing] = useState(undefined);
   const [adding, setAdding] = useState(false); // "Add Property…" picker open
   const [copying, setCopying] = useState(false);
-  const [showTenants, setShowTenants] = useState(false); // home page link: the all-tenants page
+  const [tab, setTab] = useState('Properties'); // home page tab: Properties | Tenants
   // Home page dialog: undefined = closed, null = adding, object = editing that house
   const [editingHouse, setEditingHouse] = useState(undefined);
 
@@ -67,7 +66,7 @@ export default function App() {
       return res.error;
     }
     await loadYears();
-    setYear(res.data);
+    toast(`Year ${res.data} added.`);
   }
 
   // Returns an error message to show in the form, or nothing on success
@@ -127,65 +126,61 @@ export default function App() {
     toast('Property saved.');
   }
 
-  if (year === null && showTenants) {
-    return <TenantsPage onBack={() => setShowTenants(false)} />;
-  }
-
-  if (year === null) {
-    return (
-      <>
-        <Toaster />
-        <YearSelect
-          onShowTenants={() => setShowTenants(true)}
-          years={years}
-          properties={allProperties}
-          onSelect={setYear}
-          onAddYear={addYear}
-          onEdit={setEditingHouse}
-        />
-        {editingHouse !== undefined && (
-          <PropertyForm
-            key={editingHouse ? editingHouse.id : 'new'}
-            houseOnly
-            property={editingHouse}
-            onSave={saveHouse}
-            onCancel={() => setEditingHouse(undefined)}
-          />
-        )}
-      </>
-    );
-  }
-
-  return (
+  // The selected year's records, shown inside the Properties tab
+  const yearView = year === null ? null : (
     <>
-      <Toaster />
-      <header>
-        <button onClick={() => setYear(null)}>← Home</button>
-        <h1>Properties {year}</h1>
-        <div className="header-actions">
+      <nav className="breadcrumb">
+        <button type="button" className="btn-link" onClick={() => setYear(null)}>← Properties Overview</button>
+      </nav>
+      <div className="section-head">
+        <h2>Properties {year}</h2>
+        <div className="header-actions" style={{ margin: 0 }}>
           <label className="year-switch">
             Year
             <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
               {years.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </label>
+          <button
+            onClick={() => setCopying(true)}
+            disabled={years.length < 2}
+            title={years.length < 2 ? 'No other year to copy from' : ''}
+          >
+            Copy from year…
+          </button>
+          <button className="primary" onClick={() => { loadAll(); setAdding(true); }}>+ Add Property…</button>
         </div>
-        <button
-          onClick={() => setCopying(true)}
-          disabled={years.length < 2}
-          title={years.length < 2 ? 'No other year to copy from' : ''}
-        >
-          Copy from year…
-        </button>
-        <button className="primary" onClick={() => { loadAll(); setAdding(true); }}>+ Add Property…</button>
-      </header>
+      </div>
+      <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} />
+      <YearlySummary properties={properties} />
+    </>
+  );
 
-      <main>
-        <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} />
-        <YearlySummary properties={properties} />
-      </main>
+  return (
+    <>
+      <Toaster />
+      <YearSelect
+        tab={tab}
+        onTab={setTab}
+        years={years}
+        properties={allProperties}
+        onSelect={setYear}
+        onAddYear={addYear}
+        onEdit={setEditingHouse}
+        yearView={yearView}
+      />
 
-      {copying && (
+      {editingHouse !== undefined && (
+        <PropertyForm
+          key={editingHouse ? editingHouse.id : 'new'}
+          houseOnly
+          property={editingHouse}
+          onSave={saveHouse}
+          onCancel={() => setEditingHouse(undefined)}
+        />
+      )}
+
+      {year !== null && copying && (
         <CopyFromYear
           years={years.filter((y) => y !== year)}
           existing={properties}
@@ -194,7 +189,7 @@ export default function App() {
         />
       )}
 
-      {adding && (
+      {year !== null && adding && (
         <AddToYear
           year={year}
           houses={allProperties}
@@ -204,7 +199,7 @@ export default function App() {
         />
       )}
 
-      {editing && (
+      {year !== null && editing && (
         <PropertyForm
           key={editing.id}
           property={editing}
