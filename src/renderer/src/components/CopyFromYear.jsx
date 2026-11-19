@@ -5,7 +5,10 @@ import { useEffect, useRef, useState } from 'react';
  * `years` are the other years to pick from; `existing` are the houses already
  * in the current year (used to flag duplicates).
  */
-export default function CopyFromYear({ years, existing, onCopy, onCancel }) {
+// YYYY-MM-DD -> MM/DD/YYYY
+const usDate = (iso) => iso.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$2/$3/$1');
+
+export default function CopyFromYear({ year, years, existing, onCopy, onCancel }) {
   const dialogRef = useRef(null);
   const [source, setSource] = useState(years[0] ?? '');
   const [houses, setHouses] = useState([]);
@@ -43,7 +46,9 @@ export default function CopyFromYear({ years, existing, onCopy, onCancel }) {
     return () => { stale = true; };
   }, [source]);
 
-  const available = houses.filter((p) => !have.has(key(p)));
+  // Not selectable: already in this year, or no purchase date / bought after this year
+  const notYet = (p) => !p.purchaseDate || Number(p.purchaseDate.slice(0, 4)) > year;
+  const available = houses.filter((p) => !have.has(key(p)) && !notYet(p));
 
   function toggle(id) {
     setSelected((s) => {
@@ -68,10 +73,10 @@ export default function CopyFromYear({ years, existing, onCopy, onCancel }) {
   }
 
   return (
-    <dialog ref={dialogRef} onCancel={onCancel}>
+    <dialog ref={dialogRef} className="add-to-year" onCancel={onCancel}>
       <form onSubmit={submit}>
         <h2>Copy houses from another year</h2>
-        <label>
+        <label className="source">
           Copy from
           <select value={source} onChange={(e) => { setError(''); setSource(Number(e.target.value)); }}>
             {years.map((y) => <option key={y} value={y}>{y}</option>)}
@@ -89,22 +94,26 @@ export default function CopyFromYear({ years, existing, onCopy, onCancel }) {
                 checked={allSelected}
                 disabled={available.length === 0}
                 onChange={() => setSelected(allSelected ? new Set() : new Set(available.map((p) => p.id)))}
-              />{' '}
-              Select all
+              />
+              <strong>Select all</strong>
             </label>
             <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0', maxHeight: 260, overflowY: 'auto' }}>
               {houses.map((p) => {
                 const dup = have.has(key(p));
+                const late = notYet(p);
                 return (
                   <li key={p.id}>
                     <label>
                       <input
                         type="checkbox"
-                        disabled={dup}
+                        disabled={dup || late}
                         checked={selected.has(p.id)}
                         onChange={() => toggle(p.id)}
-                      />{' '}
-                      {p.address}, {p.city}{dup ? ' (already in this year)' : ''}
+                      />
+                      <span>
+                        {p.address}, {p.city} (purchased {p.purchaseDate ? usDate(p.purchaseDate) : 'date unknown'})
+                        {dup ? ' - already in this year' : late ? ` - not available for ${year}` : ''}
+                      </span>
                     </label>
                   </li>
                 );

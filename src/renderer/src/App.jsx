@@ -133,14 +133,21 @@ export default function App() {
         <button type="button" className="btn-link" onClick={() => setYear(null)}>← Properties Overview</button>
       </nav>
       <div className="section-head">
-        <h2>Properties {year}</h2>
-        <div className="header-actions" style={{ margin: 0 }}>
-          <label className="year-switch">
-            Year
-            <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-              {years.map((y) => <option key={y} value={y}>{y}</option>)}
+        <div className="year-title">
+          <h2>Properties {year}</h2>
+          <label className="year-picker">
+            <select
+              aria-label="Select another year"
+              value=""
+              onChange={(e) => e.target.value && setYear(Number(e.target.value))}
+              disabled={years.length < 2}
+            >
+              <option value="">Select another year</option>
+              {years.filter((y) => y !== year).map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </label>
+        </div>
+        <div className="header-actions" style={{ margin: 0 }}>
           <button
             onClick={() => setCopying(true)}
             disabled={years.length < 2}
@@ -182,6 +189,7 @@ export default function App() {
 
       {year !== null && copying && (
         <CopyFromYear
+          year={year}
           years={years.filter((y) => y !== year)}
           existing={properties}
           onCopy={copyFrom}

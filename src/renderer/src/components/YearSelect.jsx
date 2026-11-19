@@ -14,6 +14,8 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
   const [mapFor, setMapFor] = useState(null); // property whose map is open
   const [leasesFor, setLeasesFor] = useState(null); // property whose leases are being managed
 
+  const exists = years.includes(Number(newYear));
+
   async function add(e) {
     e.preventDefault();
     const err = await onAddYear(newYear);
@@ -64,25 +66,27 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                   onChange={(e) => setNewYear(e.target.value)}
                 />
               </label>
-              <button type="submit">Add year</button>
+              <button type="submit" disabled={exists} title={exists ? `${newYear} is already added` : ''}>Add year</button>
             </form>
             {error && <p className="error">{error}</p>}
           </section>
           ) : yearView ? yearView : <>
         <div className="section-head">
-          <h2>Properties Overview</h2>
-          <div className="header-actions" style={{ margin: 0 }}>
-            <label className="year-switch">
-              View year
+          <div className="year-title">
+            <h2>Properties Overview</h2>
+            <label className="year-picker">
               <select
+                aria-label="Select a year"
                 value=""
                 onChange={(e) => e.target.value && onSelect(Number(e.target.value))}
                 disabled={years.length === 0}
               >
-                <option value="">{years.length ? 'Select a year…' : 'No years yet'}</option>
+                <option value="">{years.length ? 'Select a year' : 'No years yet'}</option>
                 {years.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
             </label>
+          </div>
+          <div className="header-actions" style={{ margin: 0 }}>
             <button className="primary" onClick={() => onEdit(null)}>+ Add Property</button>
           </div>
         </div>

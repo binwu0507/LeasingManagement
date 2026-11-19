@@ -932,7 +932,9 @@ function copyFromYear(targetValue, sourceValue, ids) {
   try {
     addYear(target);
     for (const p of list(source)) {
-      if (!wanted.has(p.id) || existing.has(p.propertyId)) {
+      // Skip houses already there, without a purchase date, or bought after the target year
+      if (!wanted.has(p.id) || existing.has(p.propertyId)
+          || !p.purchaseDate || Number(p.purchaseDate.slice(0, 4)) > target) {
         continue;
       }
       insert.run({ year: target, propertyId: p.propertyId });

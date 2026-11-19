@@ -130,10 +130,21 @@ main h2 { margin: 0 0 12px; font-size: 1.1rem; }
 .tab:hover { background: #eef0f3; }
 .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
 
+.year-add input { width: 140px; }
+.year-add label { flex: none; }
 .year-list { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0 0 16px; }
 .year-list li { background: #e8efff; color: #1d4fd0; border-radius: 999px; padding: 4px 14px; font-weight: 600; }
 
 .breadcrumb { margin-bottom: 8px; }
+.year-title { display: flex; align-items: center; gap: 20px; }
+.year-title h2 { margin: 0; }
+.year-picker { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 0.85rem; color: #61697a; }
+.year-picker select {
+  width: auto; margin: 0; padding: 4px 28px 4px 12px; font-weight: 600; color: #1d4fd0;
+  background-color: #e8efff; border: 1px solid #b9ccf7; border-radius: 999px; cursor: pointer;
+}
+.year-picker select:hover { background-color: #dbe6ff; }
+.year-picker select:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25); }
 /* Bootstrap-style link button: looks like a link, behaves like a button */
 button.btn-link {
   background: none; border: 1px solid transparent; border-radius: 6px;
@@ -186,6 +197,7 @@ dialog.add-to-year { width: min(760px, 95vw); }
 .add-to-year label { font-size: 1rem; display: flex; align-items: center; gap: 8px; margin: 0 0 8px; white-space: nowrap; }
 .add-to-year input[type="checkbox"] { display: inline-block; width: auto; margin: 0; flex: none; }
 .add-to-year li label { margin-bottom: 4px; }
+.add-to-year label.source { display: block; white-space: normal; font-size: 0.85rem; }
 dialog.map-dialog { width: 760px; }
 .map-dialog h2 { font-size: 1.05rem; }
 .map-dialog iframe { display: block; width: 100%; height: 440px; border: 1px solid #d5d9df; border-radius: 8px; }
