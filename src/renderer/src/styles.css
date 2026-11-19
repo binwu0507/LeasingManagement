@@ -478,7 +478,10 @@ dialog.history-dialog { width: min(1100px, 95vw); max-width: 95vw; }
 .lease-table th:nth-child(4), .lease-table td:nth-child(4),
 .lease-table th:nth-child(5), .lease-table td:nth-child(5) { width: 100px; }
 .lease-table th:nth-child(3), .lease-table td:nth-child(3) { width: 84px; }
-.lease-table th:nth-child(7), .lease-table td:nth-child(7) { width: 130px; white-space: nowrap; }
+.lease-table th:nth-child(8), .lease-table td:nth-child(8) { width: 130px; white-space: nowrap; }
+.lease-table td.agreement-cell { display: table-cell; }
+.agreement-cell .renew { margin: 0 4px 0 0; }
+.agreement-name { display: inline-block; max-width: 140px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; margin-right: 6px; }
 .lease-table button.renew { padding: 2px 8px; margin: 0 4px 0 0; font-size: 0.72rem; }
 
 /* Repair items */

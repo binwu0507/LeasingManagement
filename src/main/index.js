@@ -1,5 +1,7 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const store = require('./store');
 
 function createWindow() {
@@ -37,6 +39,65 @@ ipcMain.handle('leases:list', (event, propertyId) => respond(() => store.listLea
 ipcMain.handle('leases:add', (event, propertyId, data) => respond(() => store.addLease(propertyId, data)));
 ipcMain.handle('leases:update', (event, id, data) => respond(() => store.updateLease(id, data)));
 ipcMain.handle('leases:delete', (event, id) => respond(() => store.deleteLease(id)));
+// Lease agreement files. The file dialogs and disk access stay in this process; the page only
+// ever sees the lease record (with the agreement's file name).
+const AGREEMENT_FILTERS = [
+  { name: 'Lease agreements', extensions: ['pdf', 'doc', 'docx', 'png', 'jpg', 'jpeg', 'txt'] }
+];
+ipcMain.handle('leases:uploadAgreement', async (event, id) => {
+  try {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const picked = await dialog.showOpenDialog(win, {
+      title: 'Choose the residential lease agreement', properties: ['openFile'], filters: AGREEMENT_FILTERS
+    });
+    if (picked.canceled || picked.filePaths.length === 0) {
+      return { ok: true, data: null }; // nothing chosen
+    }
+    const file = picked.filePaths[0];
+    return { ok: true, data: store.setLeaseAgreement(Number(id), path.basename(file), fs.readFileSync(file)) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('leases:viewAgreement', async (event, id) => {
+  try {
+    const a = store.getLeaseAgreement(Number(id));
+    if (!a) {
+      throw new Error('This lease has no agreement.');
+    }
+    // Open a temporary copy in the default app (PDF viewer, Word, ...)
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-'));
+    const file = path.join(dir, path.basename(a.fileName));
+    fs.writeFileSync(file, a.data);
+    const failure = await shell.openPath(file);
+    if (failure) {
+      throw new Error(failure);
+    }
+    return { ok: true, data: null };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('leases:downloadAgreement', async (event, id) => {
+  try {
+    const a = store.getLeaseAgreement(Number(id));
+    if (!a) {
+      throw new Error('This lease has no agreement.');
+    }
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const target = await dialog.showSaveDialog(win, {
+      title: 'Save lease agreement', defaultPath: path.join(app.getPath('downloads'), a.fileName)
+    });
+    if (target.canceled || !target.filePath) {
+      return { ok: true, data: false };
+    }
+    fs.writeFileSync(target.filePath, a.data);
+    return { ok: true, data: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('leases:removeAgreement', (event, id) => respond(() => store.removeLeaseAgreement(Number(id))));
 ipcMain.handle('tenants:list', () => respond(() => store.listTenants()));
 ipcMain.handle('tenants:history', (event, id) => respond(() => store.tenantLeaseHistory(id)));
 ipcMain.handle('tenants:matches', (event, data) => respond(() => store.findTenantMatches(data)));

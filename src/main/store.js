@@ -4,7 +4,7 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
@@ -340,6 +340,16 @@ function init() {
     db.exec(`ALTER TABLE lease_tenants ADD COLUMN occupying INTEGER NOT NULL DEFAULT 1
              CHECK (occupying IN (0, 1))`);
   }
+  if (version < 12) {
+    // The signed residential lease agreement (one file per lease), stored inside the database.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lease_agreements (
+        leaseId INTEGER PRIMARY KEY REFERENCES leases(id) ON DELETE CASCADE,
+        fileName TEXT NOT NULL,
+        data BLOB NOT NULL
+      );
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -646,7 +656,9 @@ function addYear(value) {
 
 const SELECT_HOUSE = `SELECT id, ${PROPERTY_FIELDS.join(', ')} FROM properties`;
 
-const SELECT_LEASE = 'SELECT id, startDate, endDate, monthlyRent, moveInDate, moveOutDate FROM leases';
+// `agreementName` is the uploaded lease agreement's file name, or null when there is none.
+const SELECT_LEASE = `SELECT id, startDate, endDate, monthlyRent, moveInDate, moveOutDate,
+  (SELECT fileName FROM lease_agreements a WHERE a.leaseId = leases.id) AS agreementName FROM leases`;
 
 // A lease row plus its linked tenants.
 function withTenants(l) {
@@ -754,6 +766,34 @@ function deleteLease(id) {
   if (db.prepare('DELETE FROM leases WHERE id = ?').run(id).changes === 0) {
     throw new Error('Lease not found.');
   }
+}
+
+const MAX_AGREEMENT_BYTES = 25 * 1024 * 1024;
+
+function setLeaseAgreement(leaseId, fileName, data) {
+  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
+    throw new Error('Lease not found.');
+  }
+  if (data.length === 0) {
+    throw new Error('That file is empty.');
+  }
+  if (data.length > MAX_AGREEMENT_BYTES) {
+    throw new Error('The file is too large (25 MB maximum).');
+  }
+  db.prepare(`INSERT INTO lease_agreements (leaseId, fileName, data) VALUES (?, ?, ?)
+              ON CONFLICT(leaseId) DO UPDATE SET fileName = excluded.fileName, data = excluded.data`)
+    .run(leaseId, fileName, data);
+  return withTenants(db.prepare(`${SELECT_LEASE} WHERE id = ?`).get(leaseId));
+}
+
+// { fileName, data: Buffer } or null
+function getLeaseAgreement(leaseId) {
+  const row = db.prepare('SELECT fileName, data FROM lease_agreements WHERE leaseId = ?').get(leaseId);
+  return row ? { fileName: row.fileName, data: Buffer.from(row.data) } : null;
+}
+
+function removeLeaseAgreement(leaseId) {
+  db.prepare('DELETE FROM lease_agreements WHERE leaseId = ?').run(leaseId);
 }
 
 // Houses (no yearly figures, no leases).
@@ -996,4 +1036,4 @@ function addHousesToYear(yearValue, propertyIds) {
   return added;
 }
 
-module.exports = { init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+module.exports = { init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };

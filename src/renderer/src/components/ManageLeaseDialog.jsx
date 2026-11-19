@@ -165,6 +165,30 @@ export default function ManageLeaseDialog({ property, onClose }) {
     }
   };
 
+  // Lease agreement file actions. The main process shows the file dialogs and does the file work.
+  const agreement = async (action, l) => {
+    const res = await window.api.leases[action](l.id);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setError('');
+    if (action === 'uploadAgreement' && res.data) {
+      await reloadLeases();
+      toast('Agreement uploaded.');
+    } else if (action === 'downloadAgreement' && res.data) {
+      toast('Agreement saved.');
+    }
+  };
+  const removeAgreement = async (l) => {
+    if (!confirm(`Remove the agreement "${l.agreementName}" from this lease?`)) {
+      return;
+    }
+    await agreement('removeAgreement', l);
+    await reloadLeases();
+    toast('Agreement removed.');
+  };
+
   return (
     <dialog ref={dialogRef} onCancel={onClose}>
       <form onSubmit={(e) => e.preventDefault()} noValidate className="manage-lease">
@@ -182,6 +206,7 @@ export default function ManageLeaseDialog({ property, onClose }) {
                     <th>Move in</th>
                     <th>Move out</th>
                     <th>Tenants</th>
+                    <th>Agreement</th>
                     <th />
                   </tr>
                 </thead>
@@ -194,6 +219,24 @@ export default function ManageLeaseDialog({ property, onClose }) {
                       <td>{usDate(l.moveInDate) || '—'}</td>
                       <td>{usDate(l.moveOutDate) || '—'}</td>
                       <td>{occupyingNames(l) || '—'}</td>
+                      <td className="agreement-cell">
+                        {l.agreementName ? (
+                          <>
+                            <span className="agreement-name" title={l.agreementName}>📄 {l.agreementName}</span>
+                            <button type="button" className="renew" onClick={() => agreement('viewAgreement', l)}
+                              title="Open in your default app">View</button>
+                            <button type="button" className="renew" onClick={() => agreement('downloadAgreement', l)}
+                              title="Save a copy">Download</button>
+                            <button type="button" className="renew" onClick={() => agreement('uploadAgreement', l)}
+                              title="Replace with another file">Replace</button>
+                            <button type="button" className="link" onClick={() => removeAgreement(l)}
+                              title="Remove agreement" aria-label="Remove agreement">✕</button>
+                          </>
+                        ) : (
+                          <button type="button" className="renew" onClick={() => agreement('uploadAgreement', l)}
+                            title="Upload the signed residential lease agreement">Upload…</button>
+                        )}
+                      </td>
                       <td>
                         {canRenew(l, leases) && (
                           <button type="button" className="renew" onClick={() => setLeaseDialog({ mode: 'renew', lease: renewalFor(l) })}

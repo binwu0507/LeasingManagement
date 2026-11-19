@@ -9,7 +9,11 @@ contextBridge.exposeInMainWorld('api', {
     list: (propertyId) => ipcRenderer.invoke('leases:list', propertyId),
     add: (propertyId, data) => ipcRenderer.invoke('leases:add', propertyId, data),
     update: (id, data) => ipcRenderer.invoke('leases:update', id, data),
-    remove: (id) => ipcRenderer.invoke('leases:delete', id)
+    remove: (id) => ipcRenderer.invoke('leases:delete', id),
+    uploadAgreement: (id) => ipcRenderer.invoke('leases:uploadAgreement', id),
+    viewAgreement: (id) => ipcRenderer.invoke('leases:viewAgreement', id),
+    downloadAgreement: (id) => ipcRenderer.invoke('leases:downloadAgreement', id),
+    removeAgreement: (id) => ipcRenderer.invoke('leases:removeAgreement', id)
   },
   tenants: {
     list: () => ipcRenderer.invoke('tenants:list'),
