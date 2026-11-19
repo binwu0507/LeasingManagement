@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import MapDialog from './MapDialog.jsx';
+import ManageLeaseDialog from './ManageLeaseDialog.jsx';
 
 /**
  * Home page: lists every property (no yearly figures) with a year selector
@@ -10,6 +11,7 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
   const [newYear, setNewYear] = useState(String(new Date().getFullYear()));
   const [error, setError] = useState('');
   const [mapFor, setMapFor] = useState(null); // property whose map is open
+  const [leasesFor, setLeasesFor] = useState(null); // property whose leases are being managed
 
   async function add(e) {
     e.preventDefault();
@@ -98,6 +100,7 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                   <td>{p.purchaseDate}</td>
                   <td className="row-actions">
                     <button onClick={() => onEdit(p)}>Edit</button>
+                    <button onClick={() => setLeasesFor(p)}>Manage Lease</button>
                   </td>
                 </tr>
               ))}
@@ -107,6 +110,7 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
       </main>
 
       {mapFor && <MapDialog property={mapFor} onClose={() => setMapFor(null)} />}
+      {leasesFor && <ManageLeaseDialog property={leasesFor} onClose={() => setLeasesFor(null)} />}
     </>
   );
 }
