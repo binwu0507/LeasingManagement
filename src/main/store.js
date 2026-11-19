@@ -681,12 +681,26 @@ function setLeaseTenants(leaseId, tenants) {
   }
 }
 
+// A property cannot have two leases whose terms overlap (dates inclusive).
+function assertNoPropertyOverlap(propertyId, excludeLeaseId, startDate, endDate) {
+  const c = db.prepare(`
+    SELECT startDate, endDate FROM leases
+    WHERE propertyId = ? AND id <> ? AND startDate <= ? AND endDate >= ?
+    ORDER BY startDate LIMIT 1
+  `).get(propertyId, excludeLeaseId, endDate, startDate);
+  if (c) {
+    throw new Error(`This lease term (${startDate} to ${endDate}) overlaps an existing lease of this property `
+      + `(${c.startDate} to ${c.endDate}).`);
+  }
+}
+
 // Leases are saved on their own, independent of the property's own details.
 function addLease(propertyId, data) {
   const [clean] = cleanLeases([data]);
   if (!db.prepare('SELECT 1 FROM properties WHERE id = ?').get(propertyId)) {
     throw new Error('Property not found.');
   }
+  assertNoPropertyOverlap(propertyId, -1, clean.startDate, clean.endDate);
   db.exec('BEGIN');
   try {
     const { lastInsertRowid } = db.prepare(`
@@ -704,9 +718,11 @@ function addLease(propertyId, data) {
 
 function updateLease(id, data) {
   const [clean] = cleanLeases([data]);
-  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(id)) {
+  const existing = db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(id);
+  if (!existing) {
     throw new Error('Lease not found.');
   }
+  assertNoPropertyOverlap(existing.propertyId, id, clean.startDate, clean.endDate);
   db.exec('BEGIN');
   try {
     db.prepare(`

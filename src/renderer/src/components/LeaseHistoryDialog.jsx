@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { money } from '../finance.js';
-
-// YYYY-MM-DD -> MM/DD/YYYY
-const usDate = (s) => (s ? s.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$2/$3/$1') : '');
+import { money, usDate } from '../finance.js';
 
 /** Popup listing every lease a tenant has been on, newest first. */
 export default function LeaseHistoryDialog({ tenant, onClose }) {

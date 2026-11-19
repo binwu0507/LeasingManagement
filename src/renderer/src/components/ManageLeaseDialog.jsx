@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { money as formatMoney } from '../finance.js';
+import { money as formatMoney, usDate } from '../finance.js';
 import LeaseDialog from './LeaseDialog.jsx';
 import { toast } from '../toast.js';
 
@@ -167,7 +167,7 @@ export default function ManageLeaseDialog({ property, onClose }) {
 
   return (
     <dialog ref={dialogRef} onCancel={onClose}>
-      <form onSubmit={(e) => e.preventDefault()} noValidate>
+      <form onSubmit={(e) => e.preventDefault()} noValidate className="manage-lease">
         <h2>Manage Lease — {property.address}</h2>
         <fieldset className="leases">
           <legend>Leasing contracts ({leases.length}) — saved as soon as you confirm</legend>
@@ -188,11 +188,11 @@ export default function ManageLeaseDialog({ property, onClose }) {
                 <tbody>
                   {leases.map((l) => (
                     <tr key={l.id}>
-                      <td>{l.startDate}</td>
-                      <td>{l.endDate}</td>
+                      <td>{usDate(l.startDate)}</td>
+                      <td>{usDate(l.endDate)}</td>
                       <td>{formatMoney.format(l.monthlyRent)}</td>
-                      <td>{l.moveInDate || '—'}</td>
-                      <td>{l.moveOutDate || '—'}</td>
+                      <td>{usDate(l.moveInDate) || '—'}</td>
+                      <td>{usDate(l.moveOutDate) || '—'}</td>
                       <td>{occupyingNames(l) || '—'}</td>
                       <td>
                         {canRenew(l, leases) && (

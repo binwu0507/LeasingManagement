@@ -3,6 +3,9 @@
 export const money = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' });
 
 // Optional amounts show as an em dash when not provided
+// YYYY-MM-DD -> MM/DD/YYYY ('' stays '')
+export const usDate = (s) => (s ? s.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$2/$3/$1') : '');
+
 export const optMoney = (v) => (v === null || v === undefined ? '—' : money.format(v));
 
 export const sum = (list, field) => list.reduce((total, p) => total + (p[field] || 0), 0);
