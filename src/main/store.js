@@ -616,6 +616,25 @@ function listLeases(propertyId) {
 
 // Replace a lease's tenant links with the given (already validated) list.
 function setLeaseTenants(leaseId, tenants) {
+  const { startDate, endDate } = db.prepare('SELECT startDate, endDate FROM leases WHERE id = ?').get(leaseId);
+  // A person cannot be on two leases whose terms overlap (dates are inclusive).
+  const clash = db.prepare(`
+    SELECT l.startDate, l.endDate, p.address, p.city
+    FROM lease_tenants lt
+    JOIN leases l ON l.id = lt.leaseId
+    JOIN properties p ON p.id = l.propertyId
+    WHERE lt.tenantId = ? AND l.id <> ? AND l.startDate <= ? AND l.endDate >= ?
+    ORDER BY l.startDate LIMIT 1
+  `);
+  const nameOf = db.prepare('SELECT firstName, lastName FROM tenants WHERE id = ?');
+  for (const t of tenants) {
+    const c = clash.get(t.tenantId, leaseId, endDate, startDate);
+    if (c) {
+      const n = nameOf.get(t.tenantId);
+      throw new Error(`${n.firstName} ${n.lastName} is already on a lease at ${c.address}, ${c.city} `
+        + `(${c.startDate} to ${c.endDate}) that overlaps this lease term (${startDate} to ${endDate}).`);
+    }
+  }
   db.prepare('DELETE FROM lease_tenants WHERE leaseId = ?').run(leaseId);
   const link = db.prepare('INSERT INTO lease_tenants (leaseId, tenantId, occupying) VALUES (?, ?, ?)');
   const exists = db.prepare('SELECT 1 FROM tenants WHERE id = ?');
