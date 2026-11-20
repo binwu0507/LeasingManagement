@@ -2,6 +2,26 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import TenantDialog from './TenantDialog.jsx';
 import { useT } from '../i18n.jsx';
+import { toast } from '../toast.js';
+
+// Small stroke icons (inherit the text colour) for the document buttons.
+const svg = (...paths) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {paths.map((d) => <path key={d} d={d} />)}
+  </svg>
+);
+const ICONS = {
+  view: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+    </svg>
+  ),
+  download: svg('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'),
+  replace: svg('M17 1l4 4-4 4', 'M3 11V9a4 4 0 0 1 4-4h14', 'M7 23l-4-4 4-4', 'M21 13v2a4 4 0 0 1-4 4H3'),
+  remove: svg('M18 6L6 18', 'M6 6l12 12')
+};
 
 /**
  * Lease dialog (add or renew): the new lease (pre-populated or blank) can be edited, then confirmed or cancelled.
@@ -15,12 +35,53 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
   const [draft, setDraft] = useState(lease);
   const [error, setError] = useState('');
   const [addingTenant, setAddingTenant] = useState(false);
+  // Leasing documents exist only for a saved lease (edit mode); they are saved immediately.
+  const leaseId = lease.id;
+  const [docs, setDocs] = useState([]);
+  const [docError, setDocError] = useState('');
+  const [docTypes, setDocTypes] = useState([]);
+  // Upload flow: null = idle, otherwise the document type chosen so far ('' = none yet)
+  const [pickType, setPickType] = useState(null);
 
   useEffect(() => {
     if (!dialogRef.current.open) {
       dialogRef.current.showModal();
     }
   }, []);
+
+  useEffect(() => {
+    if (leaseId !== undefined) {
+      window.api.leases.listDocuments(leaseId).then((res) => res.ok && setDocs(res.data));
+      window.api.documentTypes.list().then((res) => res.ok && setDocTypes(res.data));
+    }
+  }, [leaseId]);
+
+  // action: addDocument (needs the lease id), replaceDocument/viewDocument/downloadDocument/removeDocument (doc id).
+  const docAction = async (action, id, extra) => {
+    const res = await window.api.leases[action](id, extra);
+    if (!res.ok) {
+      setDocError(res.error);
+      return;
+    }
+    setDocError('');
+    if (Array.isArray(res.data)) {
+      setDocs(res.data);
+      toast(t(action === 'addDocument' ? 'Document uploaded.' : action === 'replaceDocument' ? 'Document replaced.' : 'Document removed.'));
+    } else if (action === 'downloadDocument' && res.data) {
+      toast(t('Document saved.'));
+    }
+  };
+  // Second step of the upload: the type is chosen, now pick the file.
+  const startUpload = async () => {
+    const typeId = Number(pickType);
+    setPickType(null);
+    await docAction('addDocument', leaseId, typeId);
+  };
+  const removeDoc = (d) => {
+    if (window.confirm(t('Remove the document "{name}" from this lease?', { name: d.fileName }))) {
+      docAction('removeDocument', d.id);
+    }
+  };
 
   const set = (e) => setDraft((d) => applyChange(d, e.target.name, e.target.value));
   const toggleTenant = (tenantId) => setDraft((d) => ({
@@ -101,6 +162,63 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
             );
           })}
           <button type="button" onClick={() => setAddingTenant(true)}>{t('+ Add tenant')}</button>
+        </fieldset>
+        <fieldset className="renew-tenants lease-docs">
+          <legend>{t('Leasing Documents')}</legend>
+          {leaseId === undefined ? (
+            <p className="hint">{t('Save the lease first, then edit it to attach documents.')}</p>
+          ) : (
+            <>
+              {docs.length === 0 && <p className="hint">{t('No documents yet.')}</p>}
+              {docs.length > 0 && (
+                <table className="repair-table doc-table">
+                  <thead>
+                    <tr>
+                      <th>{t('File name')}</th>
+                      <th>{t('Document type')}</th>
+                      <th className="doc-actions-col">{t('Actions')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {docs.map((d) => (
+                      <tr key={d.id}>
+                        <td className="doc-file" title={d.fileName}>📄 {d.fileName}</td>
+                        <td>{d.typeName || <span className="hint">{t('No type')}</span>}</td>
+                        <td className="doc-actions-col">
+                          <span className="doc-actions">
+                            <button type="button" className="icon-btn" onClick={() => docAction('viewDocument', d.id)}
+                              title={t('Open in your default app')} aria-label={t('View')}>{ICONS.view}</button>
+                            <button type="button" className="icon-btn" onClick={() => docAction('downloadDocument', d.id)}
+                              title={t('Save a copy')} aria-label={t('Download')}>{ICONS.download}</button>
+                            <button type="button" className="icon-btn" onClick={() => docAction('replaceDocument', d.id)}
+                              title={t('Replace with another file')} aria-label={t('Replace')}>{ICONS.replace}</button>
+                            <button type="button" className="icon-btn danger" onClick={() => removeDoc(d)}
+                              title={t('Remove document')} aria-label={t('Remove document')}>{ICONS.remove}</button>
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {pickType === null ? (
+                <button type="button" onClick={() => setPickType('')}>{t('+ Upload document')}</button>
+              ) : (
+                <div className="doc-type-pick">
+                  <label>
+                    {t('Select a document type')}
+                    <select autoFocus value={pickType} onChange={(e) => setPickType(e.target.value)}>
+                      <option value="">{docTypes.length ? t('Choose…') : t('No document types — add some in Admin')}</option>
+                      {docTypes.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                    </select>
+                  </label>
+                  <button type="button" className="primary" disabled={!pickType} onClick={startUpload}>{t('Choose file…')}</button>
+                  <button type="button" onClick={() => setPickType(null)}>{t('Cancel')}</button>
+                </div>
+              )}
+              {docError && <p className="error">{docError}</p>}
+            </>
+          )}
         </fieldset>
         {error && <p className="error">{error}</p>}
         <div className="actions">

@@ -454,6 +454,15 @@ dialog.history-dialog { width: min(1100px, 95vw); max-width: 95vw; }
 }
 .renew-tenants input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--primary); }
 .tenant-line { display: flex; align-items: center; justify-content: space-between; }
+.doc-line { gap: 8px; padding: 2px 0; }
+.doc-name { flex: 1; min-width: 0; max-width: none; white-space: nowrap; }
+.doc-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0; margin: 0; border-radius: 6px; cursor: pointer;
+}
+.icon-btn.danger { border-color: transparent; background: transparent; }
+.icon-btn.danger:hover { color: #c0392b; }
 
 .tenant-matches { list-style: none; margin: 8px 0; padding: 0; }
 .tenant-matches li {
@@ -740,3 +749,34 @@ button.pref-switch:focus-visible { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3
 :root[data-theme="dark"] .map-dialog iframe { filter: invert(0.92) hue-rotate(180deg); }
 :root[data-theme="dark"] button.pref-switch { border-color: rgba(255, 255, 255, 0.2); }
 :root[data-theme="dark"] .pref-switch span.on { background: var(--primary); color: #0b1220; }
+
+/* Admin cards */
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 20px 24px; margin-bottom: 20px; box-shadow: var(--shadow-sm);
+}
+.card > h2:first-child { margin-top: 0; }
+.card > :last-child { margin-bottom: 0; }
+
+/* Admin: leasing document types */
+.type-list { list-style: none; padding: 0; margin: 0 0 20px; max-width: 520px; }
+.type-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border, #d9dde6); }
+.type-name { flex: 1; }
+
+.type-edit { display: flex; align-items: center; gap: 8px; flex: 1; }
+.type-edit input { flex: 1; margin: 0; }
+.doc-types .year-add input { width: 260px; }
+
+.doc-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.doc-info .doc-name { flex: none; }
+.doc-type { font-size: 0.8rem; margin-left: 22px; }
+.doc-type-pick { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
+.doc-type-pick label { margin: 0; flex: 1; min-width: 180px; }
+
+dialog:has(.lease-docs) { width: min(820px, 95vw); max-width: 95vw; }
+.doc-table { width: 100%; margin-bottom: 12px; }
+.doc-table td, .doc-table th { text-align: left; white-space: nowrap; }
+/* The file name column takes all leftover space and truncates; the others fit their content. */
+.doc-table td.doc-file { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.doc-table .doc-actions-col { width: 1%; }
+.doc-table .doc-actions { justify-content: flex-start; }

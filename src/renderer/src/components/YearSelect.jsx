@@ -2,6 +2,7 @@ import { useState } from 'react';
 import MapDialog from './MapDialog.jsx';
 import ManageLeaseDialog from './ManageLeaseDialog.jsx';
 import TenantsPage from './TenantsPage.jsx';
+import DocumentTypesAdmin from './DocumentTypesAdmin.jsx';
 import { usDate } from '../finance.js';
 import { useT, usePrefs } from '../i18n.jsx';
 
@@ -10,11 +11,17 @@ import { useT, usePrefs } from '../i18n.jsx';
  * that opens the property list for the chosen year.
  * `onAddYear` returns an error message, or nothing on success.
  */
+const ADD_ICON = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+);
+
 export default function YearSelect({ years, properties, onSelect, onAddYear, onEdit, tab, onTab, yearView }) {
   const t = useT();
   const { lang, theme, toggleLang, toggleTheme } = usePrefs();
   const [newYear, setNewYear] = useState(String(new Date().getFullYear()));
   const [error, setError] = useState('');
+  const [addingYear, setAddingYear] = useState(false); // the add form is hidden until the + icon is clicked
   const [mapFor, setMapFor] = useState(null); // property whose map is open
   const [leasesFor, setLeasesFor] = useState(null); // property whose leases are being managed
 
@@ -45,6 +52,9 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
     e.preventDefault();
     const err = await onAddYear(newYear);
     setError(err || '');
+    if (!err) {
+      setAddingYear(false);
+    }
   }
 
   return (
@@ -81,7 +91,8 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
           ))}
         </div>
         {tab === 'Tenants' ? <TenantsPage /> : tab === 'Admin' ? (
-          <section>
+          <>
+          <section className="card">
             <h2>{t('Years')}</h2>
             <p className="hint">{t('Years already added:')}</p>
             {years.length === 0 ? (
@@ -91,22 +102,32 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                 {years.map((y) => <li key={y}>{y}</li>)}
               </ul>
             )}
-            <form onSubmit={add} className="year-add">
-              <label>
-                {t('Add a year')}
-                <input
-                  type="number"
-                  min="1900"
-                  max="2200"
-                  step="1"
-                  value={newYear}
-                  onChange={(e) => setNewYear(e.target.value)}
-                />
-              </label>
-              <button type="submit" disabled={exists} title={exists ? t('{year} is already added', { year: newYear }) : ''}>{t('Add year')}</button>
-            </form>
+            {addingYear ? (
+              <form onSubmit={add} className="year-add">
+                <label>
+                  {t('Add a year')}
+                  <input
+                    autoFocus
+                    type="number"
+                    min="1900"
+                    max="2200"
+                    step="1"
+                    value={newYear}
+                    onChange={(e) => setNewYear(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Escape' && (setAddingYear(false), setError(''))}
+                  />
+                </label>
+                <button type="submit" disabled={exists} title={exists ? t('{year} is already added', { year: newYear }) : ''}>{t('Add year')}</button>
+                <button type="button" onClick={() => { setAddingYear(false); setError(''); }}>{t('Cancel')}</button>
+              </form>
+            ) : (
+              <button type="button" className="icon-btn" title={t('Add a year')} aria-label={t('Add a year')}
+                onClick={() => setAddingYear(true)}>{ADD_ICON}</button>
+            )}
             {error && <p className="error">{error}</p>}
           </section>
+          <DocumentTypesAdmin />
+          </>
           ) : yearView ? yearView : <>
         <div className="section-head">
           <div className="year-title">

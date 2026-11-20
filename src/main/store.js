@@ -4,7 +4,7 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 16;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
@@ -350,6 +350,44 @@ function init() {
       );
     `);
   }
+  if (version < 13) {
+    // Any number of supporting documents per lease, stored inside the database.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lease_documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        leaseId INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+        fileName TEXT NOT NULL,
+        data BLOB NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_lease_documents_lease ON lease_documents (leaseId);
+    `);
+  }
+  if (version < 14) {
+    // Previously uploaded lease agreements become ordinary leasing documents.
+    db.exec(`
+      INSERT INTO lease_documents (leaseId, fileName, data)
+        SELECT leaseId, fileName, data FROM lease_agreements;
+      DELETE FROM lease_agreements;
+    `);
+  }
+  if (version < 15) {
+    // Admin-managed list of leasing document types.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS document_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+      );
+      INSERT OR IGNORE INTO document_types (name) VALUES
+        ('Residential Lease Agreement'), ('Addendum'), ('Move-in Inspection'), ('Other');
+    `);
+  }
+  if (version < 16) {
+    // Each leasing document has a type (kept as NULL if the type is later deleted).
+    db.exec(`
+      ALTER TABLE lease_documents ADD COLUMN typeId INTEGER REFERENCES document_types(id) ON DELETE SET NULL;
+      UPDATE lease_documents SET typeId = (SELECT id FROM document_types WHERE name = 'Residential Lease Agreement');
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -657,8 +695,11 @@ function addYear(value) {
 const SELECT_HOUSE = `SELECT id, ${PROPERTY_FIELDS.join(', ')} FROM properties`;
 
 // `agreementName` is the uploaded lease agreement's file name, or null when there is none.
+// `fileCount` is the number of downloadable files (agreement + documents).
 const SELECT_LEASE = `SELECT id, startDate, endDate, monthlyRent, moveInDate, moveOutDate,
-  (SELECT fileName FROM lease_agreements a WHERE a.leaseId = leases.id) AS agreementName FROM leases`;
+  (SELECT fileName FROM lease_agreements a WHERE a.leaseId = leases.id) AS agreementName,
+  (SELECT COUNT(*) FROM lease_agreements a WHERE a.leaseId = leases.id)
+    + (SELECT COUNT(*) FROM lease_documents d WHERE d.leaseId = leases.id) AS fileCount FROM leases`;
 
 // A lease row plus its linked tenants.
 function withTenants(l) {
@@ -794,6 +835,111 @@ function getLeaseAgreement(leaseId) {
 
 function removeLeaseAgreement(leaseId) {
   db.prepare('DELETE FROM lease_agreements WHERE leaseId = ?').run(leaseId);
+}
+
+// Leasing documents: several files per lease. Lists never include the file bytes.
+function listLeaseDocuments(leaseId) {
+  return db.prepare(`SELECT d.id, d.fileName, d.typeId, t.name AS typeName FROM lease_documents d
+    LEFT JOIN document_types t ON t.id = d.typeId WHERE d.leaseId = ? ORDER BY d.id`).all(leaseId).map(toPlain);
+}
+
+function addLeaseDocument(leaseId, typeId, fileName, data) {
+  if (!db.prepare('SELECT 1 FROM document_types WHERE id = ?').get(typeId)) {
+    throw new Error('Choose a document type.');
+  }
+  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
+    throw new Error('Lease not found.');
+  }
+  if (data.length === 0) {
+    throw new Error('That file is empty.');
+  }
+  if (data.length > MAX_AGREEMENT_BYTES) {
+    throw new Error('The file is too large (25 MB maximum).');
+  }
+  db.prepare('INSERT INTO lease_documents (leaseId, typeId, fileName, data) VALUES (?, ?, ?, ?)').run(leaseId, typeId, fileName, data);
+  return listLeaseDocuments(leaseId);
+}
+
+// Replaces the file behind an existing document.
+function replaceLeaseDocument(docId, fileName, data) {
+  const row = db.prepare('SELECT leaseId FROM lease_documents WHERE id = ?').get(docId);
+  if (!row) {
+    throw new Error('Document not found.');
+  }
+  if (data.length === 0) {
+    throw new Error('That file is empty.');
+  }
+  if (data.length > MAX_AGREEMENT_BYTES) {
+    throw new Error('The file is too large (25 MB maximum).');
+  }
+  db.prepare('UPDATE lease_documents SET fileName = ?, data = ? WHERE id = ?').run(fileName, data, docId);
+  return listLeaseDocuments(row.leaseId);
+}
+
+// { fileName, data: Buffer } or null
+function getLeaseDocument(docId) {
+  const row = db.prepare('SELECT fileName, data FROM lease_documents WHERE id = ?').get(docId);
+  return row ? { fileName: row.fileName, data: Buffer.from(row.data) } : null;
+}
+
+function removeLeaseDocument(docId) {
+  const row = db.prepare('SELECT leaseId FROM lease_documents WHERE id = ?').get(docId);
+  db.prepare('DELETE FROM lease_documents WHERE id = ?').run(docId);
+  return row ? listLeaseDocuments(row.leaseId) : [];
+}
+
+// Every file of a lease (the agreement first, then the documents) for the "download all" zip.
+function getLeaseFiles(leaseId) {
+  const lease = db.prepare('SELECT startDate, endDate FROM leases WHERE id = ?').get(leaseId);
+  if (!lease) {
+    throw new Error('Lease not found.');
+  }
+  const files = [];
+  const agreement = getLeaseAgreement(leaseId);
+  if (agreement) {
+    files.push(agreement);
+  }
+  for (const row of db.prepare('SELECT fileName, data FROM lease_documents WHERE leaseId = ? ORDER BY id').all(leaseId)) {
+    files.push({ fileName: row.fileName, data: Buffer.from(row.data) });
+  }
+  return { startDate: lease.startDate, endDate: lease.endDate, files };
+}
+
+// Leasing document types (Admin screen).
+function cleanTypeName(name) {
+  const n = typeof name === 'string' ? name.trim() : '';
+  if (!n) {
+    throw new Error('Enter a document type name.');
+  }
+  if (n.length > 60) {
+    throw new Error('The name is too long (60 characters maximum).');
+  }
+  return n;
+}
+function listDocumentTypes() {
+  return db.prepare('SELECT id, name FROM document_types ORDER BY name COLLATE NOCASE').all().map(toPlain);
+}
+function addDocumentType(name) {
+  try {
+    db.prepare('INSERT INTO document_types (name) VALUES (?)').run(cleanTypeName(name));
+  } catch (err) {
+    throw new Error(/UNIQUE/.test(err.message) ? 'That document type already exists.' : err.message);
+  }
+  return listDocumentTypes();
+}
+function updateDocumentType(id, name) {
+  try {
+    if (db.prepare('UPDATE document_types SET name = ? WHERE id = ?').run(cleanTypeName(name), id).changes === 0) {
+      throw new Error('Document type not found.');
+    }
+  } catch (err) {
+    throw new Error(/UNIQUE/.test(err.message) ? 'That document type already exists.' : err.message);
+  }
+  return listDocumentTypes();
+}
+function deleteDocumentType(id) {
+  db.prepare('DELETE FROM document_types WHERE id = ?').run(id);
+  return listDocumentTypes();
 }
 
 // Houses (no yearly figures, no leases).
@@ -1036,4 +1182,4 @@ function addHousesToYear(yearValue, propertyIds) {
   return added;
 }
 
-module.exports = { init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+module.exports = { init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };

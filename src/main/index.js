@@ -98,6 +98,164 @@ ipcMain.handle('leases:downloadAgreement', async (event, id) => {
   }
 });
 ipcMain.handle('leases:removeAgreement', (event, id) => respond(() => store.removeLeaseAgreement(Number(id))));
+// Leasing documents (several per lease): same split as above, file work stays in this process.
+async function pickFile(event, title) {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const picked = await dialog.showOpenDialog(win, { title, properties: ['openFile'], filters: AGREEMENT_FILTERS });
+  return picked.canceled || picked.filePaths.length === 0 ? null : picked.filePaths[0];
+}
+ipcMain.handle('leases:listDocuments', (event, leaseId) => respond(() => store.listLeaseDocuments(Number(leaseId))));
+ipcMain.handle('leases:addDocument', async (event, leaseId, typeId) => {
+  try {
+    const file = await pickFile(event, 'Choose a leasing document');
+    if (!file) {
+      return { ok: true, data: null };
+    }
+    return { ok: true, data: store.addLeaseDocument(Number(leaseId), Number(typeId), path.basename(file), fs.readFileSync(file)) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('leases:replaceDocument', async (event, docId) => {
+  try {
+    const file = await pickFile(event, 'Choose the replacement document');
+    if (!file) {
+      return { ok: true, data: null };
+    }
+    return { ok: true, data: store.replaceLeaseDocument(Number(docId), path.basename(file), fs.readFileSync(file)) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('leases:viewDocument', async (event, docId) => {
+  try {
+    const d = store.getLeaseDocument(Number(docId));
+    if (!d) {
+      throw new Error('Document not found.');
+    }
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-'));
+    const file = path.join(dir, path.basename(d.fileName));
+    fs.writeFileSync(file, d.data);
+    const failure = await shell.openPath(file);
+    if (failure) {
+      throw new Error(failure);
+    }
+    return { ok: true, data: null };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('leases:downloadDocument', async (event, docId) => {
+  try {
+    const d = store.getLeaseDocument(Number(docId));
+    if (!d) {
+      throw new Error('Document not found.');
+    }
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const target = await dialog.showSaveDialog(win, {
+      title: 'Save leasing document', defaultPath: path.join(app.getPath('downloads'), d.fileName)
+    });
+    if (target.canceled || !target.filePath) {
+      return { ok: true, data: false };
+    }
+    fs.writeFileSync(target.filePath, d.data);
+    return { ok: true, data: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+// Minimal ZIP writer (deflate, no zip64): files = [{ fileName, data }].
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) {
+    c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  }
+  return c >>> 0;
+});
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const b of buf) {
+    c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+function buildZip(files) {
+  const zlib = require('zlib');
+  const used = new Set();
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const f of files) {
+    // unique entry name: "a.pdf", "a (2).pdf", ...
+    const ext = path.extname(f.fileName);
+    const base = path.basename(f.fileName, ext);
+    let name = base + ext;
+    for (let i = 2; used.has(name.toLowerCase()); i++) {
+      name = `${base} (${i})${ext}`;
+    }
+    used.add(name.toLowerCase());
+    const nameBuf = Buffer.from(name, 'utf8');
+    const packed = zlib.deflateRawSync(f.data);
+    const crc = crc32(f.data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6); // UTF-8 names
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(packed.length, 18);
+    local.writeUInt32LE(f.data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    const head = Buffer.alloc(46);
+    head.writeUInt32LE(0x02014b50, 0);
+    head.writeUInt16LE(20, 4);
+    head.writeUInt16LE(20, 6);
+    head.writeUInt16LE(0x0800, 8);
+    head.writeUInt16LE(8, 10);
+    head.writeUInt32LE(crc, 16);
+    head.writeUInt32LE(packed.length, 20);
+    head.writeUInt32LE(f.data.length, 24);
+    head.writeUInt16LE(nameBuf.length, 28);
+    head.writeUInt32LE(offset, 42);
+    central.push(head, nameBuf);
+    parts.push(local, nameBuf, packed);
+    offset += 30 + nameBuf.length + packed.length;
+  }
+  const centralBuf = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralBuf.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, centralBuf, end]);
+}
+ipcMain.handle('leases:downloadAllDocuments', async (event, leaseId) => {
+  try {
+    const lease = store.getLeaseFiles(Number(leaseId));
+    if (lease.files.length === 0) {
+      throw new Error('This lease has no documents.');
+    }
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const target = await dialog.showSaveDialog(win, {
+      title: 'Save lease documents',
+      defaultPath: path.join(app.getPath('downloads'), `Lease_${lease.startDate}_to_${lease.endDate}_documents.zip`),
+      filters: [{ name: 'Zip archive', extensions: ['zip'] }]
+    });
+    if (target.canceled || !target.filePath) {
+      return { ok: true, data: false };
+    }
+    fs.writeFileSync(target.filePath, buildZip(lease.files));
+    return { ok: true, data: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('leases:removeDocument', (event, docId) => respond(() => store.removeLeaseDocument(Number(docId))));
+ipcMain.handle('documentTypes:list', () => respond(() => store.listDocumentTypes()));
+ipcMain.handle('documentTypes:add', (event, name) => respond(() => store.addDocumentType(name)));
+ipcMain.handle('documentTypes:update', (event, id, name) => respond(() => store.updateDocumentType(Number(id), name)));
+ipcMain.handle('documentTypes:delete', (event, id) => respond(() => store.deleteDocumentType(Number(id))));
 ipcMain.handle('tenants:list', () => respond(() => store.listTenants()));
 ipcMain.handle('tenants:history', (event, id) => respond(() => store.tenantLeaseHistory(id)));
 ipcMain.handle('tenants:matches', (event, data) => respond(() => store.findTenantMatches(data)));

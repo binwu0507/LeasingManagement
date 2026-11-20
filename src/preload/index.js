@@ -13,7 +13,20 @@ contextBridge.exposeInMainWorld('api', {
     uploadAgreement: (id) => ipcRenderer.invoke('leases:uploadAgreement', id),
     viewAgreement: (id) => ipcRenderer.invoke('leases:viewAgreement', id),
     downloadAgreement: (id) => ipcRenderer.invoke('leases:downloadAgreement', id),
-    removeAgreement: (id) => ipcRenderer.invoke('leases:removeAgreement', id)
+    removeAgreement: (id) => ipcRenderer.invoke('leases:removeAgreement', id),
+    listDocuments: (leaseId) => ipcRenderer.invoke('leases:listDocuments', leaseId),
+    addDocument: (leaseId, typeId) => ipcRenderer.invoke('leases:addDocument', leaseId, typeId),
+    replaceDocument: (docId) => ipcRenderer.invoke('leases:replaceDocument', docId),
+    viewDocument: (docId) => ipcRenderer.invoke('leases:viewDocument', docId),
+    downloadDocument: (docId) => ipcRenderer.invoke('leases:downloadDocument', docId),
+    downloadAllDocuments: (leaseId) => ipcRenderer.invoke('leases:downloadAllDocuments', leaseId),
+    removeDocument: (docId) => ipcRenderer.invoke('leases:removeDocument', docId)
+  },
+  documentTypes: {
+    list: () => ipcRenderer.invoke('documentTypes:list'),
+    add: (name) => ipcRenderer.invoke('documentTypes:add', name),
+    update: (id, name) => ipcRenderer.invoke('documentTypes:update', id, name),
+    remove: (id) => ipcRenderer.invoke('documentTypes:delete', id)
   },
   tenants: {
     list: () => ipcRenderer.invoke('tenants:list'),
