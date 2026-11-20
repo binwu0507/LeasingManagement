@@ -112,6 +112,7 @@ const ZH = {
   "Driver's license": '驾照', 'License number': '驾照号码', 'Issuing state': '签发州',
   'Issue date': '签发日期', 'Expiration date': '到期日期',
   'Edit Tenant': '编辑租客', 'Edit tenant': '编辑租客', 'Tenant saved.': '租客已保存。',
+  'Has a lease': '有租约', 'Has a lease (past, current or future) — keep this tenant': '有租约（过去、当前或未来）— 请保留此租客',
   // Lease dialog
   'Add Lease': '添加租约', 'Renew Lease': '续租', 'Edit Lease': '编辑租约',
   'Fill in the lease and add its tenants, then confirm to save it.': '填写租约并添加租客，然后点击确认保存。',

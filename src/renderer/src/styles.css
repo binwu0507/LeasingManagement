@@ -784,3 +784,6 @@ dialog:has(.lease-docs) { width: min(820px, 95vw); max-width: 95vw; }
 .doc-table .doc-actions { justify-content: flex-start; }
 
 .tenant-actions { display: flex; align-items: center; gap: 4px; }
+
+.keep-cell { width: 28px; padding-right: 0; text-align: center; }
+.keep-mark { color: #1a9d55; font-weight: 700; }

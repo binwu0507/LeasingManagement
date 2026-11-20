@@ -497,10 +497,13 @@ function listTenants() {
     WHERE lt.tenantId = ? AND l.startDate <= ? AND l.endDate >= ?
     ORDER BY l.startDate DESC LIMIT 1
   `);
-  return db.prepare(`SELECT id, ${TENANT_FIELDS.join(', ')} FROM tenants ORDER BY lower(lastName), lower(firstName), id`)
+  // `hasLease`: linked to any lease (past, current or future), so the record is real data worth keeping.
+  return db.prepare(`SELECT id, ${TENANT_FIELDS.join(', ')},
+      EXISTS (SELECT 1 FROM lease_tenants lt WHERE lt.tenantId = tenants.id) AS hasLease
+    FROM tenants ORDER BY lower(lastName), lower(firstName), id`)
     .all().map((r) => {
       const lease = active.get(r.id, today, today);
-      return { ...toPlain(r), activeLease: lease ? toPlain(lease) : null };
+      return { ...toPlain(r), hasLease: !!r.hasLease, activeLease: lease ? toPlain(lease) : null };
     });
 }
 
