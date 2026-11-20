@@ -3,6 +3,7 @@ import LeaseHistoryDialog from './LeaseHistoryDialog.jsx';
 import { usDate } from '../finance.js';
 import { toast } from '../toast.js';
 import { useT } from '../i18n.jsx';
+import { US_STATES } from '../usStates.js';
 
 const maskSsn = (ssn) => `***-**-${ssn.slice(-4)}`;
 
@@ -20,7 +21,8 @@ const formatPhone = (s) => {
   return `(${d.slice(0, 3)}) ${d.slice(3, 6)}${d.length > 6 ? '-' + d.slice(6) : ''}`;
 };
 const MASKS = { ssn: formatSsn, phone: formatPhone };
-const FIELDS = ['firstName', 'lastName', 'gender', 'ssn', 'dateOfBirth', 'phone', 'email'];
+const FIELDS = ['firstName', 'lastName', 'gender', 'ssn', 'dateOfBirth', 'phone', 'email',
+  'licenseNumber', 'licenseState', 'licenseIssueDate', 'licenseExpireDate'];
 
 /**
  * A table cell that is always an input, styled to look like text until hovered or focused.
@@ -64,6 +66,14 @@ function EditCell({ value, field, label, display, onCommit, ...rest }) {
         <option value="Male">{t('Male')}</option>
         <option value="Female">{t('Female')}</option>
         <option value="Other">{t('Other')}</option>
+      </select>
+    );
+  }
+  if (field === 'licenseState') {
+    return (
+      <select {...common} value={text} onChange={(e) => setDraft(e.target.value)}>
+        <option value="">—</option>
+        {US_STATES.map(([code]) => <option key={code} value={code}>{code}</option>)}
       </select>
     );
   }
@@ -138,6 +148,10 @@ export default function TenantsPage() {
                 <th>{t('Date of birth')}</th>
                 <th>{t('Phone')}</th>
                 <th>{t('Email')}</th>
+                <th>{t('License number')}</th>
+                <th>{t('Issuing state')}</th>
+                <th>{t('Issue date')}</th>
+                <th>{t('Expiration date')}</th>
                 <th>{t('Active lease')}</th>
               </tr>
             </thead>
@@ -154,6 +168,10 @@ export default function TenantsPage() {
                   {cell(tn, 'dateOfBirth', 'Date of birth', { type: 'date' })}
                   {cell(tn, 'phone', 'Phone', { type: 'tel', maxLength: 14, placeholder: '—' })}
                   {cell(tn, 'email', 'Email', { type: 'email', placeholder: '—' })}
+                  {cell(tn, 'licenseNumber', 'License number', { type: 'text', maxLength: 30, placeholder: '—' })}
+                  {cell(tn, 'licenseState', 'Issuing state')}
+                  {cell(tn, 'licenseIssueDate', 'Issue date', { type: 'date' })}
+                  {cell(tn, 'licenseExpireDate', 'Expiration date', { type: 'date' })}
                   <td>
                     <button type="button" className="map-icon" onClick={() => setHistoryFor(tn)}
                       title={t('Leasing history')} aria-label={t('Leasing history of {name}', { name: `${tn.firstName} ${tn.lastName}` })}>🕘</button>

@@ -109,6 +109,9 @@ const ZH = {
   'Select a document type': '选择文件类型', 'Choose…': '请选择…', 'Choose file…': '选择文件…', 'No type': '无类型',
   'No document types — add some in Admin': '没有文件类型 — 请先在“管理”中添加', 'Choose a document type.': '请选择文件类型。',
   'File name': '文件名', 'Document type': '文件类型',
+  "Driver's license": '驾照', 'License number': '驾照号码', 'Issuing state': '签发州',
+  'Issue date': '签发日期', 'Expiration date': '到期日期',
+  'Edit Tenant': '编辑租客', 'Edit tenant': '编辑租客', 'Tenant saved.': '租客已保存。',
   // Lease dialog
   'Add Lease': '添加租约', 'Renew Lease': '续租', 'Edit Lease': '编辑租约',
   'Fill in the lease and add its tenants, then confirm to save it.': '填写租约并添加租客，然后点击确认保存。',

@@ -4,7 +4,7 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
@@ -388,10 +388,20 @@ function init() {
       UPDATE lease_documents SET typeId = (SELECT id FROM document_types WHERE name = 'Residential Lease Agreement');
     `);
   }
+  if (version < 17) {
+    // Driver's license details (all optional).
+    db.exec(`
+      ALTER TABLE tenants ADD COLUMN licenseNumber TEXT;
+      ALTER TABLE tenants ADD COLUMN licenseState TEXT;
+      ALTER TABLE tenants ADD COLUMN licenseIssueDate TEXT;
+      ALTER TABLE tenants ADD COLUMN licenseExpireDate TEXT;
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
-const TENANT_FIELDS = ['firstName', 'lastName', 'gender', 'ssn', 'dateOfBirth', 'phone', 'email'];
+const TENANT_FIELDS = ['firstName', 'lastName', 'gender', 'ssn', 'dateOfBirth', 'phone', 'email',
+  'licenseNumber', 'licenseState', 'licenseIssueDate', 'licenseExpireDate'];
 const GENDERS = ['Male', 'Female', 'Other'];
 
 function validateTenant(data) {
@@ -404,7 +414,11 @@ function validateTenant(data) {
     ssn: text(d.ssn),
     dateOfBirth: text(d.dateOfBirth) || null,
     phone: text(d.phone) || null,
-    email: text(d.email) || null
+    email: text(d.email) || null,
+    licenseNumber: text(d.licenseNumber) || null,
+    licenseState: text(d.licenseState).toUpperCase() || null,
+    licenseIssueDate: text(d.licenseIssueDate) || null,
+    licenseExpireDate: text(d.licenseExpireDate) || null
   };
   if (!clean.firstName) {
     throw new Error('First name is required.');
@@ -432,6 +446,20 @@ function validateTenant(data) {
   }
   if (clean.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean.email)) {
     throw new Error('Email must be a valid address (or left blank).');
+  }
+  if (clean.licenseNumber !== null && clean.licenseNumber.length > 30) {
+    throw new Error("Driver's license number is too long (30 characters maximum).");
+  }
+  if (clean.licenseState !== null && !/^[A-Z]{2}$/.test(clean.licenseState)) {
+    throw new Error("Driver's license state must be a 2-letter state code (or left blank).");
+  }
+  for (const [key, label] of [['licenseIssueDate', 'issue date'], ['licenseExpireDate', 'expiration date']]) {
+    if (clean[key] !== null && !isValidDate(clean[key])) {
+      throw new Error(`Driver's license ${label} must be a valid date (or left blank).`);
+    }
+  }
+  if (clean.licenseIssueDate && clean.licenseExpireDate && clean.licenseExpireDate < clean.licenseIssueDate) {
+    throw new Error("Driver's license expiration date cannot be before the issue date.");
   }
   return clean;
 }

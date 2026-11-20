@@ -426,6 +426,7 @@ dialog.history-dialog { width: min(1100px, 95vw); max-width: 95vw; }
 /* Fieldset-style cards inside dialogs */
 .leases,
 .renew-tenants,
+.license,
 .repairs {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -436,6 +437,7 @@ dialog.history-dialog { width: min(1100px, 95vw); max-width: 95vw; }
 .renew-tenants { padding-bottom: 8px; }
 .leases legend,
 .renew-tenants legend,
+.license legend,
 .repairs legend {
   font-weight: 700;
   font-size: 0.85rem;
@@ -638,7 +640,7 @@ dialog[open]:has(form) { display: block; overflow-y: auto; }
 .tenant-matches li > div, .tenant-matches li > span { min-width: 0; }
 
 /* Cards in dialogs use a subtle inset look */
-.leases, .repairs, .renew-tenants { background: var(--surface-alt); }
+.leases, .repairs, .renew-tenants, .license { background: var(--surface-alt); }
 .repair-table input { background: var(--surface); }
 
 /* Toast stays above dialogs */
@@ -780,3 +782,5 @@ dialog:has(.lease-docs) { width: min(820px, 95vw); max-width: 95vw; }
 .doc-table td.doc-file { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .doc-table .doc-actions-col { width: 1%; }
 .doc-table .doc-actions { justify-content: flex-start; }
+
+.tenant-actions { display: flex; align-items: center; gap: 4px; }

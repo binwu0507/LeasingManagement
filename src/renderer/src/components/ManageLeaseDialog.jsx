@@ -133,6 +133,10 @@ export default function ManageLeaseDialog({ property, onClose }) {
     if (!tenants.some((t) => t.id === tenant.id)) {
       setTenants((all) => [...all, tenant]);
       toast(tr('Tenant added.'));
+    } else {
+      // an existing tenant was edited
+      setTenants((all) => all.map((t) => (t.id === tenant.id ? tenant : t)));
+      toast(tr('Tenant saved.'));
     }
   };
   // Adds a follow-on lease: starts the day after this one ends, runs one year, same rent and

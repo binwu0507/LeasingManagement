@@ -20,6 +20,7 @@ const ICONS = {
   ),
   download: svg('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'),
   replace: svg('M17 1l4 4-4 4', 'M3 11V9a4 4 0 0 1 4-4h14', 'M7 23l-4-4 4-4', 'M21 13v2a4 4 0 0 1-4 4H3'),
+  edit: svg('M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z'),
   remove: svg('M18 6L6 18', 'M6 6l12 12')
 };
 
@@ -35,6 +36,7 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
   const [draft, setDraft] = useState(lease);
   const [error, setError] = useState('');
   const [addingTenant, setAddingTenant] = useState(false);
+  const [editingTenant, setEditingTenant] = useState(null); // tenant record being edited
   // Leasing documents exist only for a saved lease (edit mode); they are saved immediately.
   const leaseId = lease.id;
   const [docs, setDocs] = useState([]);
@@ -105,6 +107,12 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
     }));
   };
 
+  // The tenant was edited; the parent refreshes its copy of the record.
+  const tenantSaved = (tenant) => {
+    onTenantCreated(tenant);
+    setEditingTenant(null);
+  };
+
   async function confirm(e) {
     e.preventDefault();
     e.stopPropagation();
@@ -156,8 +164,12 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
                   <input type="checkbox" checked={dt.occupying} onChange={() => toggleTenant(dt.tenantId)} />
                   {info.firstName} {info.lastName} <span className="hint">(···{info.ssn.slice(-4)})</span>
                 </label>
-                <button type="button" className="link" onClick={() => removeTenant(dt.tenantId)}
-                  title={t('Remove from this lease')} aria-label={t('Remove {name} from this lease', { name: `${info.firstName} ${info.lastName}` })}>✕</button>
+                <span className="tenant-actions">
+                  <button type="button" className="icon-btn" onClick={() => setEditingTenant(info)}
+                    title={t('Edit tenant')} aria-label={t('Edit tenant')}>{ICONS.edit}</button>
+                  <button type="button" className="icon-btn danger" onClick={() => removeTenant(dt.tenantId)}
+                    title={t('Remove from this lease')} aria-label={t('Remove {name} from this lease', { name: `${info.firstName} ${info.lastName}` })}>{ICONS.remove}</button>
+                </span>
               </div>
             );
           })}
@@ -228,6 +240,9 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
       </form>
       {addingTenant && (
         <TenantDialog onAdded={tenantAdded} onCancel={() => setAddingTenant(false)} />
+      )}
+      {editingTenant && (
+        <TenantDialog tenant={editingTenant} onAdded={tenantSaved} onCancel={() => setEditingTenant(null)} />
       )}
     </dialog>,
     document.body

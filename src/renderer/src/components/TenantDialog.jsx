@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n.jsx';
+import { US_STATES } from '../usStates.js';
 
 // Input masks: keep only digits and lay them out as typed.
 const digits = (s, max) => s.replace(/\D/g, '').slice(0, max);
@@ -16,16 +17,20 @@ const formatPhone = (s) => {
   return `(${d.slice(0, 3)}) ${d.slice(3, 6)}${d.length > 6 ? '-' + d.slice(6) : ''}`;
 };
 
-const EMPTY = { firstName: '', lastName: '', gender: '', ssn: '', dateOfBirth: '', phone: '', email: '' };
+const EMPTY = { firstName: '', lastName: '', gender: '', ssn: '', dateOfBirth: '', phone: '', email: '',
+  licenseNumber: '', licenseState: '', licenseIssueDate: '', licenseExpireDate: '' };
 
 /**
  * Add-tenant dialog. Saves the tenant right away; `onAdded(tenant)` gets the stored record.
  * Rendered in a portal so its form is not nested inside the property form.
  */
-export default function TenantDialog({ onAdded, onCancel }) {
+export default function TenantDialog({ tenant, onAdded, onCancel }) {
   const tr = useT();
   const dialogRef = useRef(null);
-  const [values, setValues] = useState(EMPTY);
+  const editing = !!tenant; // edit an existing tenant instead of adding one
+  const [values, setValues] = useState(() => (
+    tenant ? Object.fromEntries(Object.keys(EMPTY).map((k) => [k, tenant[k] ?? ''])) : EMPTY
+  ));
   const [error, setError] = useState('');
   const [matches, setMatches] = useState(null); // existing tenants matching the entered SSN/phone/email
 
@@ -42,7 +47,7 @@ export default function TenantDialog({ onAdded, onCancel }) {
   };
 
   async function create() {
-    const res = await window.api.tenants.add(values);
+    const res = editing ? await window.api.tenants.update(tenant.id, values) : await window.api.tenants.add(values);
     if (!res.ok) {
       setMatches(null);
       setError(res.error);
@@ -54,6 +59,10 @@ export default function TenantDialog({ onAdded, onCancel }) {
   async function submit(e) {
     e.preventDefault();
     e.stopPropagation(); // don't let the submit reach the property form (React bubbles through portals)
+    if (editing) {
+      await create(); // the SSN uniqueness check on update is done by the main process
+      return;
+    }
     // If the SSN, phone or email belongs to an existing tenant, ask before adding anyone new.
     const found = await window.api.tenants.findMatches(values);
     if (found.ok && found.data.length > 0) {
@@ -107,7 +116,7 @@ export default function TenantDialog({ onAdded, onCancel }) {
         </div>
       ) : (
       <form onSubmit={submit} noValidate>
-        <h2>{tr('Add Tenant')}</h2>
+        <h2>{tr(editing ? 'Edit Tenant' : 'Add Tenant')}</h2>
         <div className="row">
           {field('First name', 'firstName', { type: 'text', required: true })}
           {field('Last name', 'lastName', { type: 'text', required: true })}
@@ -135,6 +144,23 @@ export default function TenantDialog({ onAdded, onCancel }) {
           })}
         </div>
         {field('Email', 'email', { type: 'email' })}
+        <fieldset className="license">
+          <legend>{tr("Driver's license")}</legend>
+          <div className="row">
+            {field('License number', 'licenseNumber', { type: 'text', maxLength: 30, autoComplete: 'off' })}
+            <label>
+              {tr('Issuing state')}
+              <select name="licenseState" value={values.licenseState} onChange={set}>
+                <option value="">—</option>
+                {US_STATES.map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="row">
+            {field('Issue date', 'licenseIssueDate', { type: 'date' })}
+            {field('Expiration date', 'licenseExpireDate', { type: 'date' })}
+          </div>
+        </fieldset>
         {error && <p className="error">{error}</p>}
         <div className="actions">
           <button type="button" onClick={onCancel}>{tr('Cancel')}</button>
