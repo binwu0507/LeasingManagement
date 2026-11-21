@@ -79,7 +79,9 @@ const ZH = {
   'Male': '男', 'Female': '女', 'Other': '其他',
   'Leasing history': '租赁历史', 'Leasing history of {name}': '{name} 的租赁历史',
   'Leasing history — {name}': '租赁历史 — {name}',
-  'This tenant has not been on any lease.': '该租客没有任何租约记录。', 'Term': '租期', 'Rent ($/yr)': '年租金（$）',
+  'This tenant has not been on any lease.': '该租客没有任何租约记录。', 'Term': '租期', 'Rent ($/mo)': '月租金（$）', 'Monthly rent ($)': '月租金（$）',
+  'Pick a tenant': '选择租客', 'Name contains': '姓名包含', 'Type part of a tenant name.': '请输入租客姓名的一部分。',
+  'No matching tenants.': '没有匹配的租客。', 'Add selected': '添加所选',
   '{start} to {end}': '{start} 至 {end}',
   // Manage lease
   'Manage Lease — {address}': '管理租约 — {address}',
@@ -127,7 +129,7 @@ const ZH = {
   '+ Add tenant': '+ 添加租客',
   'Start and end dates are required.': '开始和结束日期为必填项。',
   'End date cannot be before the start date.': '结束日期不能早于开始日期。',
-  'Yearly rent must be a number, 0 or greater.': '年租金必须是不小于 0 的数字。',
+  'Monthly rent must be a number, 0 or greater.': '月租金必须是不小于 0 的数字。',
   'Move-out date cannot be before the move-in date.': '搬出日期不能早于入住日期。',
   // Tenant dialog
   'Add Tenant': '添加租客', 'Save tenant': '保存租客', 'Existing tenant?': '已有租客？',

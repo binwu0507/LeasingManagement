@@ -4,7 +4,7 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
@@ -70,8 +70,8 @@ function cleanLeases(leases) {
     const clean = {
       startDate: text(it.startDate),
       endDate: text(it.endDate),
-      yearlyRent: it.yearlyRent === '' || it.yearlyRent === null || it.yearlyRent === undefined
-        ? NaN : Number(it.yearlyRent),
+      monthlyRent: it.monthlyRent === '' || it.monthlyRent === null || it.monthlyRent === undefined
+        ? NaN : Number(it.monthlyRent),
       moveInDate: text(it.moveInDate) || null,
       moveOutDate: text(it.moveOutDate) || null,
       // Tenants linked to this lease; `occupying` says whether they live in the house under it.
@@ -97,8 +97,8 @@ function cleanLeases(leases) {
     if (clean.endDate < clean.startDate) {
       throw new Error(`Lease ${n}: end date cannot be before the start date.`);
     }
-    if (!Number.isFinite(clean.yearlyRent) || clean.yearlyRent < 0) {
-      throw new Error(`Lease ${n}: yearly rent must be a number, 0 or greater.`);
+    if (!Number.isFinite(clean.monthlyRent) || clean.monthlyRent < 0) {
+      throw new Error(`Lease ${n}: monthly rent must be a number, 0 or greater.`);
     }
     if (clean.moveInDate !== null && !isValidDate(clean.moveInDate)) {
       throw new Error(`Lease ${n}: move-in date must be a valid date (or left blank).`);
@@ -408,6 +408,13 @@ function init() {
       UPDATE property_years SET yearlyRent = yearlyRent * 12, yearlyHoa = yearlyHoa * 12;
     `);
   }
+  if (version < 19) {
+    // A lease's rent is a monthly amount again (only the property-year rent is yearly).
+    db.exec(`
+      ALTER TABLE leases RENAME COLUMN yearlyRent TO monthlyRent;
+      UPDATE leases SET monthlyRent = monthlyRent / 12;
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -485,7 +492,7 @@ function tenantLeaseHistory(tenantId) {
     WHERE lt.leaseId = ? ORDER BY lower(t.lastName), lower(t.firstName), t.id
   `);
   return db.prepare(`
-    SELECT l.id, l.startDate, l.endDate, l.yearlyRent, p.address, p.city
+    SELECT l.id, l.startDate, l.endDate, l.monthlyRent, p.address, p.city
     FROM lease_tenants lt
     JOIN leases l ON l.id = lt.leaseId
     JOIN properties p ON p.id = l.propertyId
@@ -749,7 +756,7 @@ const SELECT_HOUSE = `SELECT id, ${PROPERTY_FIELDS.join(', ')} FROM properties`;
 
 // `agreementName` is the uploaded lease agreement's file name, or null when there is none.
 // `fileCount` is the number of downloadable files (agreement + documents).
-const SELECT_LEASE = `SELECT id, startDate, endDate, yearlyRent, moveInDate, moveOutDate,
+const SELECT_LEASE = `SELECT id, startDate, endDate, monthlyRent, moveInDate, moveOutDate,
   (SELECT fileName FROM lease_agreements a WHERE a.leaseId = leases.id) AS agreementName,
   (SELECT COUNT(*) FROM lease_agreements a WHERE a.leaseId = leases.id)
     + (SELECT COUNT(*) FROM lease_documents d WHERE d.leaseId = leases.id) AS fileCount FROM leases`;
@@ -823,9 +830,9 @@ function addLease(propertyId, data) {
   db.exec('BEGIN');
   try {
     const { lastInsertRowid } = db.prepare(`
-      INSERT INTO leases (propertyId, startDate, endDate, yearlyRent, moveInDate, moveOutDate)
+      INSERT INTO leases (propertyId, startDate, endDate, monthlyRent, moveInDate, moveOutDate)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(propertyId, clean.startDate, clean.endDate, clean.yearlyRent, clean.moveInDate, clean.moveOutDate);
+    `).run(propertyId, clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate);
     setLeaseTenants(Number(lastInsertRowid), clean.tenants);
     db.exec('COMMIT');
     return withTenants(db.prepare(`${SELECT_LEASE} WHERE id = ?`).get(Number(lastInsertRowid)));
@@ -845,8 +852,8 @@ function updateLease(id, data) {
   db.exec('BEGIN');
   try {
     db.prepare(`
-      UPDATE leases SET startDate = ?, endDate = ?, yearlyRent = ?, moveInDate = ?, moveOutDate = ? WHERE id = ?
-    `).run(clean.startDate, clean.endDate, clean.yearlyRent, clean.moveInDate, clean.moveOutDate, id);
+      UPDATE leases SET startDate = ?, endDate = ?, monthlyRent = ?, moveInDate = ?, moveOutDate = ? WHERE id = ?
+    `).run(clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate, id);
     setLeaseTenants(id, clean.tenants);
     db.exec('COMMIT');
   } catch (err) {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import TenantDialog from './TenantDialog.jsx';
+import PickTenantDialog from './PickTenantDialog.jsx';
 import { useT } from '../i18n.jsx';
 import { toast } from '../toast.js';
 
@@ -36,6 +37,7 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
   const [draft, setDraft] = useState(lease);
   const [error, setError] = useState('');
   const [addingTenant, setAddingTenant] = useState(false);
+  const [pickingTenant, setPickingTenant] = useState(false);
   const [editingTenant, setEditingTenant] = useState(null); // tenant record being edited
   // Leasing documents exist only for a saved lease (edit mode); they are saved immediately.
   const leaseId = lease.id;
@@ -107,6 +109,18 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
     }));
   };
 
+  // Existing tenants chosen from the picker are linked to this lease, occupying. The overlap
+  // check against other leases (any property) happens when the lease is saved.
+  const tenantsPicked = (ids) => {
+    setPickingTenant(false);
+    setError('');
+    setDraft((d) => ({
+      ...d,
+      tenants: [...d.tenants, ...ids.filter((id) => !d.tenants.some((x) => x.tenantId === id))
+        .map((tenantId) => ({ tenantId, occupying: true }))]
+    }));
+  };
+
   // The tenant was edited; the parent refreshes its copy of the record.
   const tenantSaved = (tenant) => {
     onTenantCreated(tenant);
@@ -120,8 +134,8 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
       setError(t('Start and end dates are required.'));
     } else if (draft.endDate < draft.startDate) {
       setError(t('End date cannot be before the start date.'));
-    } else if (draft.yearlyRent === '' || Number(draft.yearlyRent) < 0) {
-      setError(t('Yearly rent must be a number, 0 or greater.'));
+    } else if (draft.monthlyRent === '' || Number(draft.monthlyRent) < 0) {
+      setError(t('Monthly rent must be a number, 0 or greater.'));
     } else if (draft.moveInDate && draft.moveOutDate && draft.moveOutDate < draft.moveInDate) {
       setError(t('Move-out date cannot be before the move-in date.'));
     } else {
@@ -151,7 +165,7 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
           {field('Move out', 'moveOutDate', { type: 'date' })}
         </div>
         <div className="row">
-          {field('Yearly rent ($)', 'yearlyRent', { type: 'number', min: 0, step: 0.01 })}
+          {field('Monthly rent ($)', 'monthlyRent', { type: 'number', min: 0, step: 0.01 })}
         </div>
         </fieldset>
         <fieldset className="renew-tenants">
@@ -174,7 +188,11 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
               </div>
             );
           })}
-          <button type="button" onClick={() => setAddingTenant(true)}>{t('+ Add tenant')}</button>
+          <div className="actions-inline">
+            <button type="button" onClick={() => setAddingTenant(true)}>{t('+ Add tenant')}</button>
+            {' '}
+            <button type="button" onClick={() => setPickingTenant(true)}>{t('Pick a tenant')}</button>
+          </div>
         </fieldset>
         <fieldset className="renew-tenants lease-docs">
           <legend>{t('Leasing Documents')}</legend>
@@ -241,6 +259,10 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
       </form>
       {addingTenant && (
         <TenantDialog onAdded={tenantAdded} onCancel={() => setAddingTenant(false)} />
+      )}
+      {pickingTenant && (
+        <PickTenantDialog tenants={tenants} excludeIds={draft.tenants.map((x) => x.tenantId)}
+          onPick={tenantsPicked} onCancel={() => setPickingTenant(false)} />
       )}
       {editingTenant && (
         <TenantDialog tenant={editingTenant} onAdded={tenantSaved} onCancel={() => setEditingTenant(null)} />

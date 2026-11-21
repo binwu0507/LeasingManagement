@@ -36,7 +36,7 @@ export default function LeaseHistoryDialog({ tenant, onClose }) {
               <tr>
                 <th>{t('Address')}</th>
                 <th>{t('Term')}</th>
-                <th>{t('Rent ($/yr)')}</th>
+                <th>{t('Rent ($/mo)')}</th>
                 <th>{t('Tenants')}</th>
               </tr>
             </thead>
@@ -45,7 +45,7 @@ export default function LeaseHistoryDialog({ tenant, onClose }) {
                 <tr key={l.id}>
                   <td>{l.address}, {l.city}</td>
                   <td>{usDate(l.startDate)} - {usDate(l.endDate)}</td>
-                  <td>{money.format(l.yearlyRent)}</td>
+                  <td>{money.format(l.monthlyRent)}</td>
                   <td>{l.tenantNames.join(', ')}</td>
                 </tr>
               ))}

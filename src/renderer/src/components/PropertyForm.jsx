@@ -17,7 +17,7 @@ const HOUSE_KEYS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// Rent for each month of `year`: every lease's yearly rent / 12, pro-rated by the days of that
+// Rent for each month of `year`: every lease's monthly rent, pro-rated by the days of that
 // month the lease covers (vacant months come out as 0).
 function monthlyRents(leases, year) {
   return MONTHS.map((_, m) => {
@@ -30,7 +30,7 @@ function monthlyRents(leases, year) {
       const to = l.endDate < last ? l.endDate : last;
       if (from <= to) {
         const covered = Number(to.slice(8)) - Number(from.slice(8)) + 1;
-        total += (l.yearlyRent / 12) * (covered / days);
+        total += l.monthlyRent * (covered / days);
       }
     }
     return Math.round(total * 100) / 100;
