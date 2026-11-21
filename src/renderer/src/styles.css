@@ -807,3 +807,15 @@ td .icon-btn.danger:hover:not(:disabled), .tenant-line .icon-btn.danger:hover:no
 .icon-btn svg { width: 20px; height: 20px; flex: none; }
 .row-actions .icon-btn { width: 34px; height: 34px; padding: 0; font-size: inherit; }
 .row-actions .icon-btn + .icon-btn { margin-left: 2px; }
+
+/* Property status icons */
+.status { display: inline-flex; }
+.status svg { width: 20px; height: 20px; }
+.status.vacant { color: #6b7280; }
+.status.expiring { color: #d97706; }
+
+/* Row backgrounds by status */
+tbody tr.row-vacant, tbody tr.row-vacant:hover { background: rgba(244, 114, 182, 0.16); }
+tbody tr.row-expiring, tbody tr.row-expiring:hover { background: rgba(251, 146, 60, 0.18); }
+
+.actions-col { text-align: right; }

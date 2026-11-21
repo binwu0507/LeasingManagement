@@ -177,6 +177,7 @@ export default function App() {
         onAddYear={addYear}
         onEdit={setEditingHouse}
         yearView={yearView}
+        onLeasesChanged={loadAll}
       />
 
       {editingHouse !== undefined && (

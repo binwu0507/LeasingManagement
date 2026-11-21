@@ -209,7 +209,7 @@ export default function ManageLeaseDialog({ property, onClose }) {
                     <th>{tr('Move in')}</th>
                     <th>{tr('Move out')}</th>
                     <th>{tr('Tenants')}</th>
-                    <th>{tr('Action')}</th>
+                    <th className="actions-col">{tr('Action')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -221,8 +221,8 @@ export default function ManageLeaseDialog({ property, onClose }) {
                       <td>{usDate(l.moveInDate) || '—'}</td>
                       <td>{usDate(l.moveOutDate) || '—'}</td>
                       <td>{occupyingNames(l) || '—'}</td>
-                      <td>
-                        <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                      <td className="actions-col">
+                        <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
                           {canRenew(l, leases) && (
                             <button type="button" className="icon-btn" onClick={() => setLeaseDialog({ mode: 'renew', lease: renewalFor(l) })}
                               title={tr('Add a follow-on lease starting the day after this one ends')} aria-label={tr('Renew')}>{ICONS.renew}</button>

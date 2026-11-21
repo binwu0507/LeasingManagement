@@ -985,8 +985,14 @@ function deleteDocumentType(id) {
 }
 
 // Houses (no yearly figures, no leases).
+// `currentLeaseEnd` is the end date of the lease covering today (latest end if several), or null = vacant.
 function listProperties() {
-  return db.prepare(`${SELECT_HOUSE} ORDER BY lower(address), id`).all().map(toPlain);
+  const t = new Date();
+  const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  const current = db.prepare(
+    'SELECT MAX(endDate) AS endDate FROM leases WHERE propertyId = ? AND startDate <= ? AND endDate >= ?');
+  return db.prepare(`${SELECT_HOUSE} ORDER BY lower(address), id`).all()
+    .map((r) => ({ ...toPlain(r), currentLeaseEnd: current.get(r.id, today, today).endDate || null }));
 }
 
 // Validate only the house fields; any yearly data in `data` is ignored (placeholders

@@ -17,7 +17,29 @@ const ADD_ICON = (
     strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
 );
 
-export default function YearSelect({ years, properties, onSelect, onAddYear, onEdit, tab, onTab, yearView }) {
+// 'vacant' (no lease today), 'expiring' (current lease ends within 60 days, with `days`), or null.
+function statusKind(p) {
+  if (!p.currentLeaseEnd) {
+    return { kind: 'vacant' };
+  }
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const [y, m, d] = p.currentLeaseEnd.split('-').map(Number);
+  const days = Math.round((new Date(y, m - 1, d) - today) / 86400000);
+  return days <= 60 ? { kind: 'expiring', days } : { kind: null };
+}
+
+function statusOf(p, t) {
+  const { kind, days } = statusKind(p);
+  if (kind === 'vacant') {
+    return <span className="status vacant" title={t('Vacant: not covered by a lease')} aria-label={t('Vacant')}>{ICONS.vacant}</span>;
+  }
+  return kind === 'expiring'
+    ? <span className="status expiring" title={t('Lease ends in {n} days', { n: days })} aria-label={t('Lease ending soon')}>{ICONS.warning}</span>
+    : null;
+}
+
+export default function YearSelect({ years, properties, onSelect, onAddYear, onEdit, tab, onTab, yearView, onLeasesChanged }) {
   const t = useT();
   const { lang, theme, toggleLang, toggleTheme } = usePrefs();
   const [newYear, setNewYear] = useState(String(new Date().getFullYear()));
@@ -167,12 +189,13 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                 <th className="sortable" aria-sort={ariaSort('purchaseDate')}>
                   <button type="button" className="link" onClick={() => toggleSort('purchaseDate')}>{t('Purchase Date')}{arrow('purchaseDate')}</button>
                 </th>
+                <th>{t('Status')}</th>
                 <th>{t('Actions')}</th>
               </tr>
             </thead>
             <tbody>
               {shown.map((p) => (
-                <tr key={p.id}>
+                <tr key={p.id} className={statusKind(p).kind ? `row-${statusKind(p).kind}` : undefined}>
                   <td>
                     <button
                       type="button"
@@ -192,6 +215,7 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                   <td className="num">{p.bathrooms}</td>
                   <td className="num">{p.sqft}</td>
                   <td>{usDate(p.purchaseDate)}</td>
+                  <td>{statusOf(p, t)}</td>
                   <td className="row-actions">
                     <button type="button" className="icon-btn" onClick={() => onEdit(p)}
                       title={t('Edit')} aria-label={t('Edit')}>{ICONS.edit}</button>
@@ -207,7 +231,7 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
       </main>
 
       {mapFor && <MapDialog property={mapFor} onClose={() => setMapFor(null)} />}
-      {leasesFor && <ManageLeaseDialog property={leasesFor} onClose={() => setLeasesFor(null)} />}
+      {leasesFor && <ManageLeaseDialog property={leasesFor} onClose={() => { setLeasesFor(null); onLeasesChanged?.(); }} />}
     </>
   );
 }
