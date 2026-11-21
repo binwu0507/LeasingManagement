@@ -117,7 +117,7 @@ const ZH = {
   'Delete the tenant "{name}"? This cannot be undone.': '删除租客“{name}”？此操作无法撤销。',
   'Not on any lease — click to delete this tenant': '没有任何租约 — 点击删除此租客', 'Delete tenant {name}': '删除租客 {name}',
   // Lease dialog
-  'Add Lease': '添加租约', 'Renew Lease': '续租', 'Edit Lease': '编辑租约',
+  'Add Lease': '添加租约', 'Renew Lease': '续租', 'Lease Terms': '租约条款', 'Edit Lease': '编辑租约',
   'Fill in the lease and add its tenants, then confirm to save it.': '填写租约并添加租客，然后点击确认保存。',
   'Review or edit the new lease, then confirm to save it.': '检查或修改新租约，然后点击确认保存。',
   'Change the lease, then confirm to save it.': '修改租约，然后点击确认保存。',

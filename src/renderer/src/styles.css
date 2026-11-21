@@ -775,7 +775,7 @@ button.pref-switch:focus-visible { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3
 .doc-type-pick { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
 .doc-type-pick label { margin: 0; flex: 1; min-width: 180px; }
 
-dialog:has(.lease-docs) { width: min(820px, 95vw); max-width: 95vw; }
+dialog:has(.lease-docs) { width: min(960px, 95vw); max-width: 95vw; }
 .doc-table { width: 100%; margin-bottom: 12px; }
 .doc-table td, .doc-table th { text-align: left; white-space: nowrap; }
 /* The file name column takes all leftover space and truncates; the others fit their content. */
@@ -790,3 +790,20 @@ dialog:has(.lease-docs) { width: min(820px, 95vw); max-width: 95vw; }
 
 button.link.drop-mark { color: #d92d20; padding: 0; display: inline-flex; align-items: center; }
 button.link.drop-mark:hover { color: #b42318; background: none; }
+
+/* Lease terms: titles above the inputs, four equal columns, titles on one line */
+.lease-terms .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.lease-terms .row:last-of-type { grid-template-columns: 1fr; }
+.lease-terms label { display: flex; flex-direction: column; align-items: stretch; gap: 4px; white-space: nowrap; min-width: 0; margin: 4px 0; }
+.lease-terms input { width: 100%; min-width: 0; }
+.lease-terms .row:last-of-type label { max-width: 25%; }
+
+/* Icon buttons inside table rows and lists are borderless */
+td .icon-btn, .tenant-line .icon-btn { border-color: transparent; background: transparent; box-shadow: none; }
+td .icon-btn:hover:not(:disabled), .tenant-line .icon-btn:hover:not(:disabled) { background: var(--surface-alt); }
+td .icon-btn.danger:hover:not(:disabled), .tenant-line .icon-btn.danger:hover:not(:disabled) { color: #c0392b; }
+
+/* Larger icons; override the generic .row-actions button sizing */
+.icon-btn svg { width: 20px; height: 20px; flex: none; }
+.row-actions .icon-btn { width: 34px; height: 34px; padding: 0; font-size: inherit; }
+.row-actions .icon-btn + .icon-btn { margin-left: 2px; }

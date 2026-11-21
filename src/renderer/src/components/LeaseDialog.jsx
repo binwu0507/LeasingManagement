@@ -142,17 +142,18 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
       <form onSubmit={confirm} noValidate>
         <h2>{title}</h2>
         <p className="hint">{hint}</p>
+        <fieldset className="renew-tenants lease-terms">
+          <legend>{t('Lease Terms')}</legend>
         <div className="row">
           {field('Start date', 'startDate', { type: 'date' })}
           {field('End date', 'endDate', { type: 'date' })}
+          {field('Move in', 'moveInDate', { type: 'date' })}
+          {field('Move out', 'moveOutDate', { type: 'date' })}
         </div>
         <div className="row">
           {field('Monthly rent ($)', 'monthlyRent', { type: 'number', min: 0, step: 0.01 })}
         </div>
-        <div className="row">
-          {field('Move in', 'moveInDate', { type: 'date' })}
-          {field('Move out', 'moveOutDate', { type: 'date' })}
-        </div>
+        </fieldset>
         <fieldset className="renew-tenants">
           <legend>{t('Tenants (tick those occupying)')}</legend>
           {draft.tenants.length === 0 && <p className="hint">{t('No tenants on this lease yet.')}</p>}

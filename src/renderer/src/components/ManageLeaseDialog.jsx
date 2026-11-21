@@ -4,6 +4,19 @@ import LeaseDialog from './LeaseDialog.jsx';
 import { toast } from '../toast.js';
 import { useT } from '../i18n.jsx';
 
+const icon = (...paths) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {paths.map((d) => <path key={d} d={d} />)}
+  </svg>
+);
+const ICONS = {
+  renew: icon('M17 1l4 4-4 4', 'M3 11V9a4 4 0 0 1 4-4h14', 'M7 23l-4-4 4-4', 'M21 13v2a4 4 0 0 1-4 4H3'),
+  download: icon('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'),
+  edit: icon('M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z'),
+  remove: icon('M3 6h18', 'M8 6V4h8v2', 'M19 6l-1 14H6L5 6', 'M10 11v6', 'M14 11v6')
+};
+
 const EMPTY_LEASE = { startDate: '', endDate: '', monthlyRent: '', moveInDate: '', moveOutDate: '', tenants: [] };
 
 // YYYY-MM-DD helpers in local time (lease dates are plain calendar dates).
@@ -209,17 +222,19 @@ export default function ManageLeaseDialog({ property, onClose }) {
                       <td>{usDate(l.moveOutDate) || '—'}</td>
                       <td>{occupyingNames(l) || '—'}</td>
                       <td>
-                        {canRenew(l, leases) && (
-                          <button type="button" className="renew" onClick={() => setLeaseDialog({ mode: 'renew', lease: renewalFor(l) })}
-                            title={tr('Add a follow-on lease starting the day after this one ends')}>{tr('Renew')}</button>
-                        )}
-                        <button type="button" className="renew" onClick={() => downloadDocuments(l)}
-                          disabled={!l.fileCount}
-                          title={l.fileCount ? tr('Download all lease documents as a zip file') : tr('This lease has no documents.')}>{tr('Download Documents')}</button>
-                        <button type="button" className="renew" onClick={() => setLeaseDialog({ mode: 'edit', lease: toLeaseForm(l) })}
-                          title={tr('Edit lease')}>{tr('Edit')}</button>
-                        <button type="button" className="link" onClick={() => removeLease(l)}
-                          title={tr('Delete lease')} aria-label={tr('Delete lease')}>✕</button>
+                        <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                          {canRenew(l, leases) && (
+                            <button type="button" className="icon-btn" onClick={() => setLeaseDialog({ mode: 'renew', lease: renewalFor(l) })}
+                              title={tr('Add a follow-on lease starting the day after this one ends')} aria-label={tr('Renew')}>{ICONS.renew}</button>
+                          )}
+                          <button type="button" className="icon-btn" onClick={() => downloadDocuments(l)}
+                            disabled={!l.fileCount} aria-label={tr('Download Documents')}
+                            title={l.fileCount ? tr('Download all lease documents as a zip file') : tr('This lease has no documents.')}>{ICONS.download}</button>
+                          <button type="button" className="icon-btn" onClick={() => setLeaseDialog({ mode: 'edit', lease: toLeaseForm(l) })}
+                            title={tr('Edit lease')} aria-label={tr('Edit lease')}>{ICONS.edit}</button>
+                          <button type="button" className="icon-btn danger" onClick={() => removeLease(l)}
+                            title={tr('Delete lease')} aria-label={tr('Delete lease')}>{ICONS.remove}</button>
+                        </span>
                       </td>
                     </tr>
                   ))}

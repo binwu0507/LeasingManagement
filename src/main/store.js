@@ -490,7 +490,7 @@ function listTenants() {
   const t = new Date();
   const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
   const active = db.prepare(`
-    SELECT p.address, p.city, l.startDate, l.endDate
+    SELECT p.address, p.city, p.purchaseDate, l.startDate, l.endDate
     FROM lease_tenants lt
     JOIN leases l ON l.id = lt.leaseId
     JOIN properties p ON p.id = l.propertyId

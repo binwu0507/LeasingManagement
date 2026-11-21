@@ -1,3 +1,4 @@
+import { ICONS } from '../icons.jsx';
 import { useState } from 'react';
 import MapDialog from './MapDialog.jsx';
 import ManageLeaseDialog from './ManageLeaseDialog.jsx';
@@ -192,8 +193,10 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                   <td className="num">{p.sqft}</td>
                   <td>{usDate(p.purchaseDate)}</td>
                   <td className="row-actions">
-                    <button onClick={() => onEdit(p)}>{t('Edit')}</button>
-                    <button onClick={() => setLeasesFor(p)}>{t('Manage Lease')}</button>
+                    <button type="button" className="icon-btn" onClick={() => onEdit(p)}
+                      title={t('Edit')} aria-label={t('Edit')}>{ICONS.edit}</button>
+                    <button type="button" className="icon-btn" onClick={() => setLeasesFor(p)}
+                      title={t('Manage Lease')} aria-label={t('Manage Lease')}>{ICONS.lease}</button>
                   </td>
                 </tr>
               ))}

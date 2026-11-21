@@ -1,3 +1,4 @@
+import { ICONS } from '../icons.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { money as formatMoney } from '../finance.js';
 import { useT } from '../i18n.jsx';
@@ -165,8 +166,8 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
                             onChange={(e) => setItem(i, e)} aria-label={t('Contractor')} /></td>
                           <td><input type="text" name="description" value={it.description}
                             onChange={(e) => setItem(i, e)} aria-label={t('Repair description')} /></td>
-                          <td><button type="button" className="link" onClick={() => removeItem(i)}
-                            title={t('Remove item')} aria-label={t('Remove repair item')}>✕</button></td>
+                          <td><button type="button" className="icon-btn danger" onClick={() => removeItem(i)}
+                            title={t('Remove item')} aria-label={t('Remove repair item')}>{ICONS.remove}</button></td>
                         </tr>
                       ))}
                     </tbody>

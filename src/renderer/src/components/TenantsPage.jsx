@@ -171,7 +171,12 @@ export default function TenantsPage() {
               </tr>
             </thead>
             <tbody>
-              {tenants.map((tn) => (
+              {[...tenants].sort((a, b) => {
+                // By the purchase date of the active lease's property (oldest first); no date goes last.
+                const da = a.activeLease?.purchaseDate || '9999-99-99';
+                const db = b.activeLease?.purchaseDate || '9999-99-99';
+                return da < db ? -1 : da > db ? 1 : 0;
+              }).map((tn) => (
                 <tr key={tn.id}>
                   <td className="keep-cell">
                     {!tn.hasLease && (
