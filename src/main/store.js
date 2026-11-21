@@ -507,6 +507,17 @@ function listTenants() {
     });
 }
 
+// Only a tenant not linked to any lease can be deleted.
+function deleteTenant(id) {
+  if (!db.prepare('SELECT 1 FROM tenants WHERE id = ?').get(id)) {
+    throw new Error('Tenant not found.');
+  }
+  if (db.prepare('SELECT 1 FROM lease_tenants WHERE tenantId = ?').get(id)) {
+    throw new Error('This tenant is on a lease and cannot be deleted.');
+  }
+  db.prepare('DELETE FROM tenants WHERE id = ?').run(id);
+}
+
 // Existing tenants sharing the given SSN, phone or email (formatting ignored), each with the
 // list of fields that matched. Used to ask whether a new tenant is really an existing person.
 function findTenantMatches(data) {
@@ -1213,4 +1224,4 @@ function addHousesToYear(yearValue, propertyIds) {
   return added;
 }
 
-module.exports = { init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+module.exports = { init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, deleteTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };

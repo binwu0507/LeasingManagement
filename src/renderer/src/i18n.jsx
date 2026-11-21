@@ -113,6 +113,9 @@ const ZH = {
   'Issue date': '签发日期', 'Expiration date': '到期日期',
   'Edit Tenant': '编辑租客', 'Edit tenant': '编辑租客', 'Tenant saved.': '租客已保存。',
   'Has a lease': '有租约', 'Has a lease (past, current or future) — keep this tenant': '有租约（过去、当前或未来）— 请保留此租客',
+  'Lease status': '租约状态', 'Tenant deleted.': '租客已删除。',
+  'Delete the tenant "{name}"? This cannot be undone.': '删除租客“{name}”？此操作无法撤销。',
+  'Not on any lease — click to delete this tenant': '没有任何租约 — 点击删除此租客', 'Delete tenant {name}': '删除租客 {name}',
   // Lease dialog
   'Add Lease': '添加租约', 'Renew Lease': '续租', 'Edit Lease': '编辑租约',
   'Fill in the lease and add its tenants, then confirm to save it.': '填写租约并添加租客，然后点击确认保存。',

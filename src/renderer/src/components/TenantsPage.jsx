@@ -4,6 +4,16 @@ import { usDate } from '../finance.js';
 import { toast } from '../toast.js';
 import { useT } from '../i18n.jsx';
 
+// Status icons (stroke follows the text colour, set in CSS).
+const statusIcon = (...paths) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {paths.map((d) => <path key={d} d={d} />)}
+  </svg>
+);
+const CHECK_ICON = statusIcon('M20 6L9 17l-5-5');
+const CROSS_ICON = statusIcon('M18 6L6 18', 'M6 6l12 12');
+
 const maskSsn = (ssn) => `***-**-${ssn.slice(-4)}`;
 
 // Same input masks as the Add Tenant dialog
@@ -112,6 +122,22 @@ export default function TenantsPage() {
     toast(t('Saved.'));
   }
 
+  // Deletes a tenant that is not on any lease, after confirmation.
+  async function removeTenant(tn) {
+    const name = `${tn.firstName} ${tn.lastName}`;
+    if (!window.confirm(t('Delete the tenant "{name}"? This cannot be undone.', { name }))) {
+      return;
+    }
+    const res = await window.api.tenants.remove(tn.id);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setError('');
+    setTenants((list) => list.filter((x) => x.id !== tn.id));
+    toast(t('Tenant deleted.'));
+  }
+
   const cell = (tn, field, label, props = {}) => (
     <td>
       <EditCell field={field} value={tn[field]} label={t(label)} onCommit={(f, v) => saveField(tn, f, v)} {...props} />
@@ -133,7 +159,7 @@ export default function TenantsPage() {
           <table>
             <thead>
               <tr>
-                <th className="keep-cell" aria-label={t('Has a lease')} title={t('Has a lease')} />
+                <th className="keep-cell" aria-label={t('Lease status')} title={t('Lease status')} />
                 <th>{t('First name')}</th>
                 <th>{t('Last name')}</th>
                 <th>{t('Gender')}</th>
@@ -148,9 +174,14 @@ export default function TenantsPage() {
               {tenants.map((tn) => (
                 <tr key={tn.id}>
                   <td className="keep-cell">
+                    {!tn.hasLease && (
+                      <button type="button" className="link drop-mark" onClick={() => removeTenant(tn)}
+                        title={t('Not on any lease — click to delete this tenant')}
+                        aria-label={t('Delete tenant {name}', { name: `${tn.firstName} ${tn.lastName}` })}>{CROSS_ICON}</button>
+                    )}
                     {tn.hasLease && (
                       <span className="keep-mark" title={t('Has a lease (past, current or future) — keep this tenant')}
-                        aria-label={t('Has a lease (past, current or future) — keep this tenant')}>✔</span>
+                        aria-label={t('Has a lease (past, current or future) — keep this tenant')}>{CHECK_ICON}</span>
                     )}
                   </td>
                   {cell(tn, 'firstName', 'First name', { type: 'text' })}

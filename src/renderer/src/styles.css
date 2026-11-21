@@ -786,4 +786,7 @@ dialog:has(.lease-docs) { width: min(820px, 95vw); max-width: 95vw; }
 .tenant-actions { display: flex; align-items: center; gap: 4px; }
 
 .keep-cell { width: 28px; padding-right: 0; text-align: center; }
-.keep-mark { color: #1a9d55; font-weight: 700; }
+.keep-mark { color: #1a9d55; display: inline-flex; align-items: center; }
+
+button.link.drop-mark { color: #d92d20; padding: 0; display: inline-flex; align-items: center; }
+button.link.drop-mark:hover { color: #b42318; background: none; }

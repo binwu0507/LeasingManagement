@@ -33,7 +33,8 @@ contextBridge.exposeInMainWorld('api', {
     history: (id) => ipcRenderer.invoke('tenants:history', id),
     findMatches: (data) => ipcRenderer.invoke('tenants:matches', data),
     add: (data) => ipcRenderer.invoke('tenants:add', data),
-    update: (id, data) => ipcRenderer.invoke('tenants:update', id, data)
+    update: (id, data) => ipcRenderer.invoke('tenants:update', id, data),
+    remove: (id) => ipcRenderer.invoke('tenants:delete', id)
   },
   properties: {
     addHouse: (data) => ipcRenderer.invoke('houses:add', data),
