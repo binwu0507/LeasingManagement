@@ -117,7 +117,7 @@ const ZH = {
   'Delete the tenant "{name}"? This cannot be undone.': '删除租客“{name}”？此操作无法撤销。',
   'Not on any lease — click to delete this tenant': '没有任何租约 — 点击删除此租客', 'Delete tenant {name}': '删除租客 {name}',
   // Lease dialog
-  'Add Lease': '添加租约', 'Renew Lease': '续租', 'Total': '合计', 'Calculate from leases': '按租约计算', 'Rent by month': '按月租金', 'Monthly rent from the leases covering {year}': '{year} 年内租约覆盖的每月租金', 'Apply calculated amount': '应用计算结果', 'Jan': '1月', 'Feb': '2月', 'Mar': '3月', 'Apr': '4月', 'May': '5月', 'Jun': '6月', 'Jul': '7月', 'Aug': '8月', 'Sep': '9月', 'Oct': '10月', 'Nov': '11月', 'Dec': '12月', 'Status': '状态', 'Vacant': '空置', 'Vacant: not covered by a lease': '空置：当前没有租约', 'Lease ends in {n} days': '租约将在 {n} 天后到期', 'Lease ending soon': '租约即将到期', 'Lease Terms': '租约条款', 'Edit Lease': '编辑租约',
+  'Add Lease': '添加租约', 'Renew Lease': '续租', 'Net': '净收入', 'Rent': '租金', 'HOA': '物业费', 'Mortgage interest': '房贷利息', 'Tax': '房产税', 'Insurance': '保险', 'Total': '合计', 'Calculate from leases': '按租约计算', 'Rent by month': '按月租金', 'Monthly rent from the leases covering {year}': '{year} 年内租约覆盖的每月租金', 'Apply calculated amount': '应用计算结果', 'Jan': '1月', 'Feb': '2月', 'Mar': '3月', 'Apr': '4月', 'May': '5月', 'Jun': '6月', 'Jul': '7月', 'Aug': '8月', 'Sep': '9月', 'Oct': '10月', 'Nov': '11月', 'Dec': '12月', 'Status': '状态', 'Vacant': '空置', 'Vacant: not covered by a lease': '空置：当前没有租约', 'Lease ends in {n} days': '租约将在 {n} 天后到期', 'Lease ending soon': '租约即将到期', 'Lease Terms': '租约条款', 'Edit Lease': '编辑租约',
   'Fill in the lease and add its tenants, then confirm to save it.': '填写租约并添加租客，然后点击确认保存。',
   'Review or edit the new lease, then confirm to save it.': '检查或修改新租约，然后点击确认保存。',
   'Change the lease, then confirm to save it.': '修改租约，然后点击确认保存。',

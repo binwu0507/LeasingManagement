@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import PropertyRow from './PropertyRow.jsx';
-import { MONEY_COLUMNS, money, annualTotals, netIncome } from '../finance.js';
+import { MONEY_COLUMNS, money, annualTotals, netIncome, netFormula } from '../finance.js';
 import { useT } from '../i18n.jsx';
 
 const SORT_VALUE = { net: netIncome };
@@ -59,7 +59,7 @@ export default function PropertyTable({ properties, onEdit, onDelete }) {
           {MONEY_COLUMNS.map((col) => (
             <td key={col.field} className="num">{money.format(totals[col.field])}</td>
           ))}
-          <td className={`num net-cell ${totals.net < 0 ? 'loss' : 'gain'}`}>
+          <td className={`num net-cell ${totals.net < 0 ? 'loss' : 'gain'}`} title={netFormula(totals, t, totals.net)}>
             {money.format(totals.net)}
           </td>
           <td />

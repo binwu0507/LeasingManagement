@@ -16,6 +16,16 @@ export const netIncome = (p) =>
   (p.yearlyRent - p.yearlyHoa) -
   (p.mortgageInterest || 0) - (p.propertyTax || 0) - (p.insurance || 0) - (p.repairCost || 0);
 
+// Tooltip text showing how the net amount of `p` (a property, or the totals row) is worked out.
+export function netFormula(p, t, net = netIncome(p)) {
+  const m = (v) => money.format(v || 0);
+  return [
+    `${t('Net')} = ${t('Rent')} − ${t('HOA')} − ${t('Mortgage interest')} − ${t('Tax')} − ${t('Insurance')} − ${t('Repairs')}`,
+    `= ${m(p.yearlyRent)} − ${m(p.yearlyHoa)} − ${m(p.mortgageInterest)} − ${m(p.propertyTax)} − ${m(p.insurance)} − ${m(p.repairCost)}`,
+    `= ${money.format(net)}`
+  ].join('\n');
+}
+
 // Columns in the table. `monthly` columns are multiplied by 12 in the annual totals row.
 // (Rent and HOA are stored yearly; only the mortgage payment is monthly.)
 export const MONEY_COLUMNS = [
