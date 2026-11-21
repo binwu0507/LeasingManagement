@@ -819,3 +819,20 @@ tbody tr.row-vacant, tbody tr.row-vacant:hover { background: rgba(244, 114, 182,
 tbody tr.row-expiring, tbody tr.row-expiring:hover { background: rgba(251, 146, 60, 0.18); }
 
 .actions-col { text-align: right; }
+
+/* Yearly rent calculator */
+.rent-field { position: relative; }
+.rent-input { display: flex; align-items: center; gap: 6px; }
+.rent-input input { flex: 1; min-width: 0; }
+.calc-btn { flex: none; }
+.calc-panel {
+  position: absolute; top: 100%; left: 0; z-index: 5; width: 280px; margin-top: 4px; padding: 10px 12px 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18); font-weight: 400;
+}
+.calc-panel .hint { margin: 0 0 6px; }
+.calc-table { width: 100%; margin-bottom: 10px; border-collapse: collapse; }
+.calc-table td { padding: 3px 4px; border: 0; }
+.calc-table td.num { text-align: right; }
+.calc-table tfoot td { border-top: 1px solid var(--border); font-weight: 700; padding-top: 6px; }
+.calc-panel > button { width: 100%; }

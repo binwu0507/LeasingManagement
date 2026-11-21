@@ -120,8 +120,8 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
       setError(t('Start and end dates are required.'));
     } else if (draft.endDate < draft.startDate) {
       setError(t('End date cannot be before the start date.'));
-    } else if (draft.monthlyRent === '' || Number(draft.monthlyRent) < 0) {
-      setError(t('Monthly rent must be a number, 0 or greater.'));
+    } else if (draft.yearlyRent === '' || Number(draft.yearlyRent) < 0) {
+      setError(t('Yearly rent must be a number, 0 or greater.'));
     } else if (draft.moveInDate && draft.moveOutDate && draft.moveOutDate < draft.moveInDate) {
       setError(t('Move-out date cannot be before the move-in date.'));
     } else {
@@ -151,7 +151,7 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
           {field('Move out', 'moveOutDate', { type: 'date' })}
         </div>
         <div className="row">
-          {field('Monthly rent ($)', 'monthlyRent', { type: 'number', min: 0, step: 0.01 })}
+          {field('Yearly rent ($)', 'yearlyRent', { type: 'number', min: 0, step: 0.01 })}
         </div>
         </fieldset>
         <fieldset className="renew-tenants">

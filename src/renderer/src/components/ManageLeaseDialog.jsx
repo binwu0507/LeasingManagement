@@ -17,7 +17,7 @@ const ICONS = {
   remove: icon('M3 6h18', 'M8 6V4h8v2', 'M19 6l-1 14H6L5 6', 'M10 11v6', 'M14 11v6')
 };
 
-const EMPTY_LEASE = { startDate: '', endDate: '', monthlyRent: '', moveInDate: '', moveOutDate: '', tenants: [] };
+const EMPTY_LEASE = { startDate: '', endDate: '', yearlyRent: '', moveInDate: '', moveOutDate: '', tenants: [] };
 
 // YYYY-MM-DD helpers in local time (lease dates are plain calendar dates).
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -79,7 +79,7 @@ function canRenew(lease, leases) {
 // Stored lease (nulls for blank dates) -> values for the lease dialog.
 const toLeaseForm = (l) => ({
   id: l.id,
-  startDate: l.startDate, endDate: l.endDate, monthlyRent: l.monthlyRent,
+  startDate: l.startDate, endDate: l.endDate, yearlyRent: l.yearlyRent,
   moveInDate: l.moveInDate ?? '', moveOutDate: l.moveOutDate ?? '',
   tenants: l.tenants.map((t) => ({ ...t }))
 });
@@ -153,7 +153,7 @@ export default function ManageLeaseDialog({ property, onClose }) {
     const startDate = addDays(l.endDate, 1);
     const endDate = defaultEnd(startDate);
     return {
-      startDate, endDate, monthlyRent: l.monthlyRent, moveInDate: startDate, moveOutDate: endDate,
+      startDate, endDate, yearlyRent: l.yearlyRent, moveInDate: startDate, moveOutDate: endDate,
       tenants: l.tenants.map((t) => ({ ...t })) // all linked tenants; excluded ones stay unticked
     };
   };
@@ -205,7 +205,7 @@ export default function ManageLeaseDialog({ property, onClose }) {
                   <tr>
                     <th>{tr('Start')}</th>
                     <th>{tr('End')}</th>
-                    <th>{tr('Rent ($/mo)')}</th>
+                    <th>{tr('Rent ($/yr)')}</th>
                     <th>{tr('Move in')}</th>
                     <th>{tr('Move out')}</th>
                     <th>{tr('Tenants')}</th>
@@ -217,7 +217,7 @@ export default function ManageLeaseDialog({ property, onClose }) {
                     <tr key={l.id}>
                       <td>{usDate(l.startDate)}</td>
                       <td>{usDate(l.endDate)}</td>
-                      <td>{formatMoney.format(l.monthlyRent)}</td>
+                      <td>{formatMoney.format(l.yearlyRent)}</td>
                       <td>{usDate(l.moveInDate) || '—'}</td>
                       <td>{usDate(l.moveOutDate) || '—'}</td>
                       <td>{occupyingNames(l) || '—'}</td>

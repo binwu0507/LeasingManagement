@@ -7,13 +7,89 @@ import { US_STATES } from '../usStates.js';
 const EMPTY = {
   address: '', city: '', state: '', zip: '',
   bedrooms: 0, bathrooms: 0, sqft: 0, purchaseDate: '',
-  monthlyRent: 0, mortgage: 0, hoaFee: 0, propertyTax: 0,
+  yearlyRent: 0, mortgage: 0, yearlyHoa: 0, propertyTax: 0,
   insurance: '', mortgageInterest: '',
   repairItems: []
 };
 
 // The property's own fields; the Save button is enabled only when one of these has changed.
 const HOUSE_KEYS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Rent for each month of `year`: every lease's yearly rent / 12, pro-rated by the days of that
+// month the lease covers (vacant months come out as 0).
+function monthlyRents(leases, year) {
+  return MONTHS.map((_, m) => {
+    const days = new Date(year, m + 1, 0).getDate();
+    const first = `${year}-${String(m + 1).padStart(2, '0')}-01`;
+    const last = `${year}-${String(m + 1).padStart(2, '0')}-${String(days).padStart(2, '0')}`;
+    let total = 0;
+    for (const l of leases) {
+      const from = l.startDate > first ? l.startDate : first;
+      const to = l.endDate < last ? l.endDate : last;
+      if (from <= to) {
+        const covered = Number(to.slice(8)) - Number(from.slice(8)) + 1;
+        total += (l.yearlyRent / 12) * (covered / days);
+      }
+    }
+    return Math.round(total * 100) / 100;
+  });
+}
+
+const CALC_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="4" y="2" width="16" height="20" rx="2" /><path d="M8 6h8" />
+    <path d="M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01M16 19h.01" />
+  </svg>
+);
+
+// Calculator icon beside the yearly rent input; its panel lists each month's rent from the leases.
+function RentCalculator({ propertyId, year, onApply }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [rents, setRents] = useState(null);
+
+  async function toggle() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const res = await window.api.leases.list(propertyId);
+    setRents(monthlyRents(res.ok ? res.data : [], year));
+    setOpen(true);
+  }
+  const total = rents ? Math.round(rents.reduce((a, b) => a + b, 0) * 100) / 100 : 0;
+
+  return (
+    <>
+      <button type="button" className="icon-btn calc-btn" onClick={toggle}
+        title={t('Calculate from leases')} aria-label={t('Calculate from leases')}>{CALC_ICON}</button>
+      {open && rents && (
+        <div className="calc-panel" role="dialog" aria-label={t('Rent by month')}>
+          <p className="hint">{t('Monthly rent from the leases covering {year}', { year })}</p>
+          <table className="calc-table">
+            <tbody>
+              {rents.map((r, i) => (
+                <tr key={i}>
+                  <td>{t(MONTHS[i])}</td>
+                  <td className="num">{formatMoney.format(r)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr><td>{t('Total')}</td><td className="num">{formatMoney.format(total)}</td></tr>
+            </tfoot>
+          </table>
+          <button type="button" className="primary" onClick={() => { onApply(total); setOpen(false); }}>
+            {t('Apply calculated amount')}
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
 
 const EMPTY_ITEM = { date: '', amount: '', contractor: '', description: '' };
 
@@ -128,11 +204,20 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
         {!houseOnly && (
           <>
             <div className="row">
-              {field('Monthly rent ($)', 'monthlyRent', money)}
+              <label className="rent-field">
+                {t('Yearly rent ($)')}
+                <span className="rent-input">
+                  <input name="yearlyRent" value={values.yearlyRent} onChange={set} {...money} />
+                  {property && (
+                    <RentCalculator propertyId={property.propertyId} year={property.year}
+                      onApply={(total) => setValues((v) => ({ ...v, yearlyRent: total }))} />
+                  )}
+                </span>
+              </label>
               {field('Monthly mortgage ($)', 'mortgage', money)}
             </div>
             <div className="row">
-              {field('HOA fee ($/month)', 'hoaFee', money)}
+              {field('Yearly HOA fee ($)', 'yearlyHoa', money)}
               {field('Property tax ($/year)', 'propertyTax', money)}
             </div>
             <p className="hint">{t('Optional costs (leave blank if not applicable)')}</p>

@@ -4,13 +4,13 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
 const V5_PROPERTY_FIELDS = PROPERTY_FIELDS.filter((f) => f !== 'purchaseDate');
 // Vary by year; stored per year in `property_years`.
-const YEAR_FIELDS = ['monthlyRent', 'propertyTax', 'hoaFee', 'mortgage', 'insurance', 'mortgageInterest'];
+const YEAR_FIELDS = ['yearlyRent', 'propertyTax', 'yearlyHoa', 'mortgage', 'insurance', 'mortgageInterest'];
 
 // Joined view of one yearly record: `id` is the property_years id, `propertyId` the house.
 const SELECT_RECORD = `
@@ -70,8 +70,8 @@ function cleanLeases(leases) {
     const clean = {
       startDate: text(it.startDate),
       endDate: text(it.endDate),
-      monthlyRent: it.monthlyRent === '' || it.monthlyRent === null || it.monthlyRent === undefined
-        ? NaN : Number(it.monthlyRent),
+      yearlyRent: it.yearlyRent === '' || it.yearlyRent === null || it.yearlyRent === undefined
+        ? NaN : Number(it.yearlyRent),
       moveInDate: text(it.moveInDate) || null,
       moveOutDate: text(it.moveOutDate) || null,
       // Tenants linked to this lease; `occupying` says whether they live in the house under it.
@@ -97,8 +97,8 @@ function cleanLeases(leases) {
     if (clean.endDate < clean.startDate) {
       throw new Error(`Lease ${n}: end date cannot be before the start date.`);
     }
-    if (!Number.isFinite(clean.monthlyRent) || clean.monthlyRent < 0) {
-      throw new Error(`Lease ${n}: monthly rent must be a number, 0 or greater.`);
+    if (!Number.isFinite(clean.yearlyRent) || clean.yearlyRent < 0) {
+      throw new Error(`Lease ${n}: yearly rent must be a number, 0 or greater.`);
     }
     if (clean.moveInDate !== null && !isValidDate(clean.moveInDate)) {
       throw new Error(`Lease ${n}: move-in date must be a valid date (or left blank).`);
@@ -129,9 +129,9 @@ function validate(data) {
     bathrooms: num(d.bathrooms),
     sqft: num(d.sqft),
     purchaseDate: text(d.purchaseDate) || null,   // YYYY-MM-DD (optional)
-    monthlyRent: num(d.monthlyRent),
+    yearlyRent: num(d.yearlyRent),
     propertyTax: num(d.propertyTax),    // per year (required)
-    hoaFee: num(d.hoaFee),              // per month (required)
+    yearlyHoa: num(d.yearlyHoa),              // per year (required)
     mortgage: num(d.mortgage),          // per month (required)
     insurance: optNum(d.insurance),     // per year (optional)
     repairItems: cleanRepairItems(d.repairItems),   // itemized repairs (optional; total is derived)
@@ -155,9 +155,9 @@ function validate(data) {
     ['bedrooms', 'Bedrooms'],
     ['bathrooms', 'Bathrooms'],
     ['sqft', 'Square feet'],
-    ['monthlyRent', 'Monthly rent'],
+    ['yearlyRent', 'Yearly rent'],
     ['propertyTax', 'Property tax'],
-    ['hoaFee', 'HOA fee'],
+    ['yearlyHoa', 'Yearly HOA fee'],
     ['mortgage', 'Monthly mortgage']
   ]) {
     if (!Number.isFinite(clean[field]) || clean[field] < 0) {
@@ -397,6 +397,17 @@ function init() {
       ALTER TABLE tenants ADD COLUMN licenseExpireDate TEXT;
     `);
   }
+  if (version < 18) {
+    // Rent and HOA are now yearly amounts (a property can sit vacant for months): rename the
+    // columns and convert the stored monthly values to yearly ones.
+    db.exec(`
+      ALTER TABLE leases RENAME COLUMN monthlyRent TO yearlyRent;
+      UPDATE leases SET yearlyRent = yearlyRent * 12;
+      ALTER TABLE property_years RENAME COLUMN monthlyRent TO yearlyRent;
+      ALTER TABLE property_years RENAME COLUMN hoaFee TO yearlyHoa;
+      UPDATE property_years SET yearlyRent = yearlyRent * 12, yearlyHoa = yearlyHoa * 12;
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -474,7 +485,7 @@ function tenantLeaseHistory(tenantId) {
     WHERE lt.leaseId = ? ORDER BY lower(t.lastName), lower(t.firstName), t.id
   `);
   return db.prepare(`
-    SELECT l.id, l.startDate, l.endDate, l.monthlyRent, p.address, p.city
+    SELECT l.id, l.startDate, l.endDate, l.yearlyRent, p.address, p.city
     FROM lease_tenants lt
     JOIN leases l ON l.id = lt.leaseId
     JOIN properties p ON p.id = l.propertyId
@@ -738,7 +749,7 @@ const SELECT_HOUSE = `SELECT id, ${PROPERTY_FIELDS.join(', ')} FROM properties`;
 
 // `agreementName` is the uploaded lease agreement's file name, or null when there is none.
 // `fileCount` is the number of downloadable files (agreement + documents).
-const SELECT_LEASE = `SELECT id, startDate, endDate, monthlyRent, moveInDate, moveOutDate,
+const SELECT_LEASE = `SELECT id, startDate, endDate, yearlyRent, moveInDate, moveOutDate,
   (SELECT fileName FROM lease_agreements a WHERE a.leaseId = leases.id) AS agreementName,
   (SELECT COUNT(*) FROM lease_agreements a WHERE a.leaseId = leases.id)
     + (SELECT COUNT(*) FROM lease_documents d WHERE d.leaseId = leases.id) AS fileCount FROM leases`;
@@ -812,9 +823,9 @@ function addLease(propertyId, data) {
   db.exec('BEGIN');
   try {
     const { lastInsertRowid } = db.prepare(`
-      INSERT INTO leases (propertyId, startDate, endDate, monthlyRent, moveInDate, moveOutDate)
+      INSERT INTO leases (propertyId, startDate, endDate, yearlyRent, moveInDate, moveOutDate)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(propertyId, clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate);
+    `).run(propertyId, clean.startDate, clean.endDate, clean.yearlyRent, clean.moveInDate, clean.moveOutDate);
     setLeaseTenants(Number(lastInsertRowid), clean.tenants);
     db.exec('COMMIT');
     return withTenants(db.prepare(`${SELECT_LEASE} WHERE id = ?`).get(Number(lastInsertRowid)));
@@ -834,8 +845,8 @@ function updateLease(id, data) {
   db.exec('BEGIN');
   try {
     db.prepare(`
-      UPDATE leases SET startDate = ?, endDate = ?, monthlyRent = ?, moveInDate = ?, moveOutDate = ? WHERE id = ?
-    `).run(clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate, id);
+      UPDATE leases SET startDate = ?, endDate = ?, yearlyRent = ?, moveInDate = ?, moveOutDate = ? WHERE id = ?
+    `).run(clean.startDate, clean.endDate, clean.yearlyRent, clean.moveInDate, clean.moveOutDate, id);
     setLeaseTenants(id, clean.tenants);
     db.exec('COMMIT');
   } catch (err) {
@@ -998,7 +1009,7 @@ function listProperties() {
 // Validate only the house fields; any yearly data in `data` is ignored (placeholders
 // stand in so the shared validator doesn't reject the missing/blank yearly values).
 function validateHouse(data) {
-  const placeholders = { monthlyRent: 0, propertyTax: 0, hoaFee: 0, mortgage: 0 };
+  const placeholders = { yearlyRent: 0, propertyTax: 0, yearlyHoa: 0, mortgage: 0 };
   return pick(validate({ ...pick(data || {}, PROPERTY_FIELDS), ...placeholders }), PROPERTY_FIELDS);
 }
 
@@ -1170,7 +1181,7 @@ function copyFromYear(targetValue, sourceValue, ids) {
   // A house is "already there" if the target year has a record of the same propertyId.
   const existing = new Set(list(target).map((p) => p.propertyId));
   const insert = db.prepare(`
-    INSERT INTO property_years (propertyId, year, monthlyRent, propertyTax, hoaFee, mortgage, insurance)
+    INSERT INTO property_years (propertyId, year, yearlyRent, propertyTax, yearlyHoa, mortgage, insurance)
     VALUES (@propertyId, @year, 0, 0, 0, 0, NULL)
   `);
   const wanted = new Set(ids.map(Number));
@@ -1206,7 +1217,7 @@ function addHousesToYear(yearValue, propertyIds) {
   const exists = db.prepare('SELECT purchaseDate FROM properties WHERE id = ?');
   const has = db.prepare('SELECT 1 FROM property_years WHERE propertyId = ? AND year = ?');
   const insert = db.prepare(`
-    INSERT INTO property_years (propertyId, year, monthlyRent, propertyTax, hoaFee, mortgage, insurance)
+    INSERT INTO property_years (propertyId, year, yearlyRent, propertyTax, yearlyHoa, mortgage, insurance)
     VALUES (?, ?, 0, 0, 0, 0, NULL)
   `);
   let added = 0;

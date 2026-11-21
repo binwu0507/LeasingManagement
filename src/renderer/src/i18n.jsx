@@ -30,7 +30,7 @@ const ZH = {
   // Table headers
   'Address': '地址', 'City': '城市', 'State': '州', 'Zip': '邮编', 'Beds': '卧室', 'Baths': '卫生间',
   'Sq ft': '面积（平方英尺）', 'Purchase Date': '购买日期', 'Actions': '操作',
-  'Rent / mo': '月租金', 'Mortgage / mo': '月房贷', 'Mortgage Interest / yr': '年房贷利息', 'HOA / mo': '月物业费',
+  'Rent / yr': '年租金', 'Mortgage / mo': '月房贷', 'Mortgage Interest / yr': '年房贷利息', 'HOA / yr': '年物业费',
   'Tax / yr': '年房产税', 'Insurance / yr': '年保险', 'Repairs': '维修', 'Net / yr': '年净收入',
   'Annual totals': '年度合计',
   'Edit': '编辑', 'Delete': '删除', 'Manage Lease': '管理租约', 'Show on map': '在地图上显示',
@@ -51,7 +51,7 @@ const ZH = {
   // Property form
   'Edit Property': '编辑房产', 'Add Property': '添加房产', 'Edit House': '编辑房产', 'Add House': '添加房产',
   'Bedrooms': '卧室', 'Bathrooms': '卫生间', 'Purchase date': '购买日期',
-  'Monthly rent ($)': '月租金（$）', 'Monthly mortgage ($)': '月房贷（$）', 'HOA fee ($/month)': '物业费（$/月）',
+  'Yearly rent ($)': '年租金（$）', 'Monthly mortgage ($)': '月房贷（$）', 'Yearly HOA fee ($)': '年物业费（$）',
   'Property tax ($/year)': '房产税（$/年）', 'Optional costs (leave blank if not applicable)': '可选费用（不适用请留空）',
   'Insurance ($/year)': '保险（$/年）', 'Mortgage interest ($/year)': '房贷利息（$/年）',
   'Total repair cost: {total}': '维修费用合计：{total}',
@@ -79,7 +79,7 @@ const ZH = {
   'Male': '男', 'Female': '女', 'Other': '其他',
   'Leasing history': '租赁历史', 'Leasing history of {name}': '{name} 的租赁历史',
   'Leasing history — {name}': '租赁历史 — {name}',
-  'This tenant has not been on any lease.': '该租客没有任何租约记录。', 'Term': '租期', 'Rent ($/mo)': '月租金（$）',
+  'This tenant has not been on any lease.': '该租客没有任何租约记录。', 'Term': '租期', 'Rent ($/yr)': '年租金（$）',
   '{start} to {end}': '{start} 至 {end}',
   // Manage lease
   'Manage Lease — {address}': '管理租约 — {address}',
@@ -117,7 +117,7 @@ const ZH = {
   'Delete the tenant "{name}"? This cannot be undone.': '删除租客“{name}”？此操作无法撤销。',
   'Not on any lease — click to delete this tenant': '没有任何租约 — 点击删除此租客', 'Delete tenant {name}': '删除租客 {name}',
   // Lease dialog
-  'Add Lease': '添加租约', 'Renew Lease': '续租', 'Status': '状态', 'Vacant': '空置', 'Vacant: not covered by a lease': '空置：当前没有租约', 'Lease ends in {n} days': '租约将在 {n} 天后到期', 'Lease ending soon': '租约即将到期', 'Lease Terms': '租约条款', 'Edit Lease': '编辑租约',
+  'Add Lease': '添加租约', 'Renew Lease': '续租', 'Total': '合计', 'Calculate from leases': '按租约计算', 'Rent by month': '按月租金', 'Monthly rent from the leases covering {year}': '{year} 年内租约覆盖的每月租金', 'Apply calculated amount': '应用计算结果', 'Jan': '1月', 'Feb': '2月', 'Mar': '3月', 'Apr': '4月', 'May': '5月', 'Jun': '6月', 'Jul': '7月', 'Aug': '8月', 'Sep': '9月', 'Oct': '10月', 'Nov': '11月', 'Dec': '12月', 'Status': '状态', 'Vacant': '空置', 'Vacant: not covered by a lease': '空置：当前没有租约', 'Lease ends in {n} days': '租约将在 {n} 天后到期', 'Lease ending soon': '租约即将到期', 'Lease Terms': '租约条款', 'Edit Lease': '编辑租约',
   'Fill in the lease and add its tenants, then confirm to save it.': '填写租约并添加租客，然后点击确认保存。',
   'Review or edit the new lease, then confirm to save it.': '检查或修改新租约，然后点击确认保存。',
   'Change the lease, then confirm to save it.': '修改租约，然后点击确认保存。',
@@ -127,7 +127,7 @@ const ZH = {
   '+ Add tenant': '+ 添加租客',
   'Start and end dates are required.': '开始和结束日期为必填项。',
   'End date cannot be before the start date.': '结束日期不能早于开始日期。',
-  'Monthly rent must be a number, 0 or greater.': '月租金必须是不小于 0 的数字。',
+  'Yearly rent must be a number, 0 or greater.': '年租金必须是不小于 0 的数字。',
   'Move-out date cannot be before the move-in date.': '搬出日期不能早于入住日期。',
   // Tenant dialog
   'Add Tenant': '添加租客', 'Save tenant': '保存租客', 'Existing tenant?': '已有租客？',
