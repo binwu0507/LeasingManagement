@@ -58,14 +58,9 @@ function latestLease(leases) {
   }, null);
 }
 
-// Only the latest lease can be renewed, when it ends from today up to 6 months ahead.
+// The latest lease of a property can always be renewed; no other lease can.
 function canRenew(lease, leases) {
-  if (lease !== latestLease(leases)) {
-    return false;
-  }
-  const today = new Date();
-  const limit = new Date(today.getFullYear(), today.getMonth() + 6, today.getDate());
-  return lease.endDate >= ymd(today) && lease.endDate <= ymd(limit);
+  return lease === latestLease(leases);
 }
 
 // Stored lease (nulls for blank dates) -> values for the lease dialog.
