@@ -1219,8 +1219,9 @@ function listProperties() {
   const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
   const current = db.prepare(
     'SELECT MAX(endDate) AS endDate FROM leases WHERE propertyId = ? AND startDate <= ? AND endDate >= ?');
+  const late = new Set(latePayments().items.map((i) => i.propertyId)); // rent unpaid this month
   return db.prepare(`${SELECT_HOUSE} ORDER BY lower(address), id`).all()
-    .map((r) => ({ ...toPlain(r), currentLeaseEnd: current.get(r.id, today, today).endDate || null }));
+    .map((r) => ({ ...toPlain(r), currentLeaseEnd: current.get(r.id, today, today).endDate || null, lateRent: late.has(r.id) }));
 }
 
 // Validate only the house fields; any yearly data in `data` is ignored (placeholders
@@ -1461,4 +1462,40 @@ function addHousesToYear(yearValue, propertyIds) {
   return added;
 }
 
-module.exports = { listYearPayments, addRentPayment, updateRentPayment, deleteRentPayment, getDeposit, saveDeposit, returnDeposit, init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, deleteTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+// Rent still owed for the current month, for the late-payment reminder. A house is late when a lease
+// covers the 1st of the month, more than LATE_AFTER_DAYS days have passed since the 1st, and the rent
+// payments dated in this month add up to less than the lease's monthly rent.
+const LATE_AFTER_DAYS = 4;
+function latePayments(now = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const month = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+  const first = `${month}-01`;
+  const report = {
+    today: `${month}-${pad(now.getDate())}`,
+    monthLabel: now.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+    pastGrace: now.getDate() - 1 > LATE_AFTER_DAYS,
+    items: []
+  };
+  if (!report.pastGrace) {
+    return report;
+  }
+  const leases = db.prepare(`SELECT l.id, l.propertyId, l.startDate, l.endDate, l.monthlyRent, p.address, p.city, p.state
+    FROM leases l JOIN properties p ON p.id = l.propertyId
+    WHERE l.startDate <= ? AND l.endDate >= ? ORDER BY p.address, p.city`).all(first, first);
+  const paidIn = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM lease_payments
+    WHERE leaseId = ? AND paymentType = 'Rent' AND substr(paymentDate, 1, 7) = ?`);
+  const names = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
+    WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`);
+  for (const l of leases) {
+    const paid = paidIn.get(l.id, month).total;
+    if (paid + 0.005 < l.monthlyRent) {
+      report.items.push({
+        propertyId: l.propertyId, address: l.address, city: l.city, state: l.state, leaseStart: l.startDate, leaseEnd: l.endDate,
+        rentDue: l.monthlyRent, paid, tenantNames: names.all(l.id).map((n) => `${n.firstName} ${n.lastName}`)
+      });
+    }
+  }
+  return report;
+}
+
+module.exports = { latePayments, listYearPayments, addRentPayment, updateRentPayment, deleteRentPayment, getDeposit, saveDeposit, returnDeposit, init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, deleteTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };

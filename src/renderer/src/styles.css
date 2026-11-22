@@ -134,6 +134,8 @@ button.primary:active { background: var(--primary-active); }
 
 button.danger { color: var(--danger); border-color: var(--danger-border); }
 button.danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+button.warning { color: #b45309; background: #fef3c7; border-color: #f5d28a; }
+button.warning:hover:not(:disabled) { background: #fde68a; border-color: #d97706; }
 
 button:disabled,
 button.primary:disabled {
@@ -735,6 +737,8 @@ button.pref-switch:focus-visible { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3
 :root[data-theme="dark"] button { box-shadow: none; }
 :root[data-theme="dark"] button:hover { border-color: #51608a; }
 :root[data-theme="dark"] button:active { background: #29365a; }
+:root[data-theme="dark"] button.warning { color: #fbbf24; background: rgba(251, 146, 60, 0.16); border-color: rgba(251, 146, 60, 0.45); }
+:root[data-theme="dark"] button.warning:hover:not(:disabled) { background: rgba(251, 146, 60, 0.28); border-color: #fb923c; }
 :root[data-theme="dark"] button.primary { color: #0b1220; box-shadow: none; }
 :root[data-theme="dark"] button.primary:disabled { color: var(--text-faint); }
 :root[data-theme="dark"] button.btn-link,
@@ -813,6 +817,8 @@ td .icon-btn.danger:hover:not(:disabled), .tenant-line .icon-btn.danger:hover:no
 .status svg { width: 20px; height: 20px; }
 .status.vacant { color: #6b7280; }
 .status.expiring { color: #d97706; }
+.status.late { color: #d97706; }
+.status + .status { margin-left: 6px; }
 
 /* Row backgrounds by status */
 tbody tr.row-vacant, tbody tr.row-vacant:hover { background: rgba(244, 114, 182, 0.16); }

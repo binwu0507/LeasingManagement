@@ -32,7 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   mail: {
     getSettings: () => ipcRenderer.invoke('mail:getSettings'),
     saveSettings: (data) => ipcRenderer.invoke('mail:saveSettings', data),
-    test: () => ipcRenderer.invoke('mail:test')
+    test: () => ipcRenderer.invoke('mail:test'),
+    lateReminder: () => ipcRenderer.invoke('mail:lateReminder')
   },
   documentTypes: {
     list: () => ipcRenderer.invoke('documentTypes:list'),

@@ -50,6 +50,22 @@ async function respondAndMail(event, action) {
 
 ipcMain.handle('mail:getSettings', () => respond(() => mail.getSettings()));
 ipcMain.handle('mail:saveSettings', (event, data) => respond(() => mail.saveSettings(data)));
+// Late-rent reminder: finds this month's unpaid rent, shows the email for confirmation, then sends it.
+ipcMain.handle('mail:lateReminder', async (event) => {
+  try {
+    const report = store.latePayments();
+    if (!report.pastGrace) {
+      return { ok: true, data: { status: 'too-early' } };
+    }
+    if (report.items.length === 0) {
+      return { ok: true, data: { status: 'none' } };
+    }
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return { ok: true, data: await mail.confirmLateReminder(report, win) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
 ipcMain.handle('mail:test', async () => {
   try {
     await mail.sendTest();

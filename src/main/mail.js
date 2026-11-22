@@ -113,16 +113,11 @@ function paymentMail(c) {
 }
 
 /**
- * Shows the email for a payment change and, if the user confirms, sends it (or opens a draft when
- * no account is set up). Resolves to { status: 'sent' | 'draft' | 'skipped' | 'failed', error? }.
- * Never throws: the payment itself is already saved.
+ * Shows an email and, if the user confirms, sends it (or opens a draft when no account is set up).
+ * Resolves to { status: 'sent' | 'draft' | 'skipped' | 'failed', error? }. Never throws.
  */
-async function confirmAndSend(change, win) {
-  if (!change) {
-    return { status: 'skipped' };
-  }
+async function confirmMessage({ subject, body }, win) {
   try {
-    const { subject, body } = paymentMail(change);
     const configured = !!credentials();
     const to = getSettings().to;
     const choice = await dialog.showMessageBox(win, {
@@ -146,9 +141,31 @@ async function confirmAndSend(change, win) {
     await shell.openExternal(`mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
     return { status: 'draft' };
   } catch (err) {
-    console.error('Payment email failed:', err.message);
+    console.error('Email failed:', err.message);
     return { status: 'failed', error: err.message };
   }
 }
 
-module.exports = { getSettings, saveSettings, sendTest, confirmAndSend };
+// Confirms and sends the notification for a payment change (the payment itself is already saved).
+async function confirmAndSend(change, win) {
+  return change ? confirmMessage(paymentMail(change), win) : { status: 'skipped' };
+}
+
+// Subject and body listing the late rent payments found by store.latePayments.
+function lateMail({ monthLabel, today, items }) {
+  const lines = [`Late rent payments for ${monthLabel} (checked ${us(today)}):`, ''];
+  items.forEach((i, n) => {
+    lines.push(`${n + 1}. ${i.address}, ${i.city}${i.state ? `, ${i.state}` : ''}`,
+      `   Tenants: ${i.tenantNames.length ? i.tenantNames.join(', ') : 'none listed'}`,
+      `   Lease: ${us(i.leaseStart)} - ${us(i.leaseEnd)}`,
+      `   Rent due: ${usd(i.rentDue)}; paid this month: ${usd(i.paid)}; ${i.paid > 0 ? `still owed: ${usd(i.rentDue - i.paid)}` : 'nothing received'}`, '');
+  });
+  const subject = `Late rent reminder: ${items.length} propert${items.length === 1 ? 'y' : 'ies'} - ${monthLabel}`;
+  return { subject, body: lines.join('\r\n').trimEnd() };
+}
+
+async function confirmLateReminder(report, win) {
+  return confirmMessage(lateMail(report), win);
+}
+
+module.exports = { getSettings, saveSettings, sendTest, confirmAndSend, confirmLateReminder };

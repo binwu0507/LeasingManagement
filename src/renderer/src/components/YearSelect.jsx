@@ -7,6 +7,7 @@ import DocumentTypesAdmin from './DocumentTypesAdmin.jsx';
 import EmailSettings from './EmailSettings.jsx';
 import { usDate } from '../finance.js';
 import { useT, usePrefs } from '../i18n.jsx';
+import { toast } from '../toast.js';
 
 /**
  * Home page: lists every property (no yearly figures) with a year selector
@@ -17,6 +18,15 @@ const ADD_ICON = (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
     strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
 );
+
+// Bootstrap Icons (bell, plus-lg), filled with the button's text colour.
+const BI = (d, fillRule) => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <path fillRule={fillRule} d={d} />
+  </svg>
+);
+const PLUS_ICON = BI('M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2', 'evenodd');
+const BTN_ICON = { display: 'inline-flex', alignItems: 'center', gap: 6 };
 
 // 'vacant' (no lease today), 'expiring' (current lease ends within 60 days, with `days`), or null.
 function statusKind(p) {
@@ -31,6 +41,13 @@ function statusKind(p) {
 }
 
 function statusOf(p, t) {
+  const late = p.lateRent && (
+    <span className="status late" title={t('Rent for this month is not fully paid')} aria-label={t('Late payment')}>{ICONS.bell}</span>
+  );
+  return <>{statusLease(p, t)}{late}</>;
+}
+
+function statusLease(p, t) {
   const { kind, days } = statusKind(p);
   if (kind === 'vacant') {
     return <span className="status vacant" title={t('Vacant: not covered by a lease')} aria-label={t('Vacant')}>{ICONS.vacant}</span>;
@@ -48,6 +65,28 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
   const [addingYear, setAddingYear] = useState(false); // the add form is hidden until the + icon is clicked
   const [mapFor, setMapFor] = useState(null); // property whose map is open
   const [leasesFor, setLeasesFor] = useState(null); // property whose leases are being managed
+
+  const [reminding, setReminding] = useState(false);
+
+  // Finds late rent for this month; the main process shows the email for confirmation before sending.
+  async function lateReminder() {
+    setReminding(true);
+    const res = await window.api.mail.lateReminder();
+    setReminding(false);
+    if (!res.ok) {
+      return alert(res.error);
+    }
+    const { status, error } = res.data;
+    if (status === 'too-early') {
+      toast(t('Rent is not late yet: wait until more than 4 days after the 1st.'));
+    } else if (status === 'none') {
+      toast(t('No late payments this month.'));
+    } else if (status === 'sent') {
+      toast(t('Email sent.'));
+    } else if (status === 'failed') {
+      alert(t('The email could not be sent: {error}', { error }));
+    }
+  }
 
   const [sort, setSort] = useState({ key: null, dir: 1 }); // key: 'sqft' | 'purchaseDate'
 
@@ -170,7 +209,8 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
             </label>
           </div>
           <div className="header-actions" style={{ margin: 0 }}>
-            <button className="primary" onClick={() => onEdit(null)}>{t('+ Add Property')}</button>
+            <button className="warning" style={BTN_ICON} onClick={lateReminder} disabled={reminding}>{ICONS.bell}{t('Late Payment Reminder')}</button>
+            <button className="primary" style={BTN_ICON} onClick={() => onEdit(null)}>{PLUS_ICON}{t('Add Property')}</button>
           </div>
         </div>
         {properties.length === 0 ? (
