@@ -830,9 +830,41 @@ tbody tr.row-expiring, tbody tr.row-expiring:hover { background: rgba(251, 146, 
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18); font-weight: 400;
 }
+.deposit-actions { position: relative; }
+.deposit-msg { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.deposit-msg .icon-btn { border-color: transparent; background: transparent; box-shadow: none; padding: 2px; }
+.deposit-panel {
+  position: absolute; top: 100%; left: 0; z-index: 10; width: 280px; margin-top: 4px; padding: 10px 12px 12px;
+  display: flex; flex-direction: column; gap: 8px; text-align: left; white-space: normal;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18); font-weight: 400;
+}
+.deposit-panel strong { font-weight: 700; }
+.deposit-panel label { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.deposit-panel input { width: 100%; min-width: 0; }
+.deposit-panel .error { margin: 0; }
+.deposit-panel .actions { margin: 4px 0 0; }
 .calc-panel .hint { margin: 0 0 6px; }
 .calc-table { width: 100%; margin-bottom: 10px; border-collapse: collapse; }
 .calc-table td { padding: 3px 4px; border: 0; }
 .calc-table td.num { text-align: right; }
 .calc-table tfoot td { border-top: 1px solid var(--border); font-weight: 700; padding-top: 6px; }
 .calc-panel > button { width: 100%; }
+
+/* Payments dialog */
+.payments-scroll { max-height: 60vh; overflow-y: auto; margin-bottom: 8px; }
+.payments-table { width: 100%; border-collapse: collapse; }
+.payments-table th, .payments-table td { padding: 4px 8px; vertical-align: middle; white-space: nowrap; }
+.payments-table .num { text-align: right; }
+.payments-table tbody tr:hover { background: transparent; }
+.payments-table .lease-row th { background: var(--surface-alt); text-transform: none; letter-spacing: 0; font-size: 0.85rem; text-align: left; }
+.payments-table .month-cell { width: 130px; font-weight: 600; border-right: 1px solid var(--border); vertical-align: top; }
+.payments-table .month-cell span { margin-right: 6px; }
+.payments-table tr.editing { background: var(--surface-alt); }
+.payments-table input, .payments-table select { margin: 0; padding: 4px 6px; font-size: 0.85rem; min-width: 0; }
+.payments-table input[type="number"] { width: 100px; }
+.payments-table .row-actions { text-align: right; width: 80px; }
+.payments-table tfoot td { font-weight: 700; border-top: 1px solid var(--border); }
+.payments-table .group-toggle { all: unset; display: flex; align-items: center; gap: 6px; width: 100%; cursor: pointer; font: inherit; }
+.payments-table .group-toggle:focus-visible { outline: 2px solid var(--primary, #2563eb); }
+.payments-table .chevron { display: inline-block; width: 1em; }

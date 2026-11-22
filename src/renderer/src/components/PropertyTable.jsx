@@ -5,7 +5,7 @@ import { useT } from '../i18n.jsx';
 
 const SORT_VALUE = { net: netIncome };
 
-export default function PropertyTable({ properties, onEdit, onDelete }) {
+export default function PropertyTable({ properties, onEdit, onDelete, onPayments }) {
   const t = useT();
   const [sort, setSort] = useState({ key: null, dir: 1 });
 
@@ -50,7 +50,7 @@ export default function PropertyTable({ properties, onEdit, onDelete }) {
       </thead>
       <tbody>
         {shown.map((p) => (
-          <PropertyRow key={p.id} property={p} onEdit={onEdit} onDelete={onDelete} />
+          <PropertyRow key={p.id} property={p} onEdit={onEdit} onDelete={onDelete} onPayments={onPayments} />
         ))}
       </tbody>
       <tfoot>

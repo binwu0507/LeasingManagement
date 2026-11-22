@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import TenantDialog from './TenantDialog.jsx';
 import PickTenantDialog from './PickTenantDialog.jsx';
+import DepositDialog from './DepositDialog.jsx';
 import { useT } from '../i18n.jsx';
 import { toast } from '../toast.js';
 
@@ -22,8 +23,11 @@ const ICONS = {
   download: svg('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'),
   replace: svg('M17 1l4 4-4 4', 'M3 11V9a4 4 0 0 1 4-4h14', 'M7 23l-4-4 4-4', 'M21 13v2a4 4 0 0 1-4 4H3'),
   edit: svg('M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z'),
+  returnDeposit: svg('M9 14L4 9l5-5', 'M4 9h10.5a5.5 5.5 0 0 1 0 11H11'),
   remove: svg('M18 6L6 18', 'M6 6l12 12')
 };
+
+const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 /**
  * Lease dialog (add or renew): the new lease (pre-populated or blank) can be edited, then confirmed or cancelled.
@@ -59,6 +63,32 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
       window.api.documentTypes.list().then((res) => res.ok && setDocTypes(res.data));
     }
   }, [leaseId]);
+
+  // Security deposit: undefined while loading, null = not paid, otherwise the payment record.
+  // Deposit changes are saved immediately, like documents.
+  const [deposit, setDeposit] = useState(undefined);
+  const [depMode, setDepMode] = useState(null); // 'pay' | 'return' while the deposit panel is open
+
+  useEffect(() => {
+    if (leaseId !== undefined) {
+      window.api.leases.getDeposit(leaseId).then((res) => res.ok && setDeposit(res.data));
+    }
+  }, [leaseId]);
+
+  // Returns an error message (the panel stays open) or nothing.
+  const submitDeposit = async ({ date, amount, method }) => {
+    const isReturn = depMode === 'return';
+    const res = isReturn
+      ? await window.api.leases.returnDeposit(leaseId, { returnedDate: date, returnedAmount: amount })
+      : await window.api.leases.saveDeposit(leaseId, { paymentDate: date, amount, paymentMethod: method });
+    if (!res.ok) {
+      return res.error;
+    }
+    setDeposit(res.data);
+    setDepMode(null);
+    toast(t(isReturn ? 'Deposit returned.' : 'Deposit saved.'));
+    return undefined;
+  };
 
   // action: addDocument (needs the lease id), replaceDocument/viewDocument/downloadDocument/removeDocument (doc id).
   const docAction = async (action, id, extra) => {
@@ -167,6 +197,42 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
         <div className="row">
           {field('Monthly rent ($)', 'monthlyRent', { type: 'number', min: 0, step: 0.01 })}
         </div>
+        {leaseId !== undefined && deposit !== undefined && (
+          <div className="deposit">
+            {deposit && (
+              <p className="hint deposit-actions deposit-msg">
+                {t('Security deposit of {amount} was paid on {date}.', { amount: money.format(deposit.amount), date: deposit.paymentDate })}
+                {deposit.paymentMethod && ` (${deposit.paymentMethod})`}
+                {!deposit.returnedDate && (
+                  <button type="button" className="icon-btn" onClick={() => setDepMode(depMode === 'pay' ? null : 'pay')}
+                    title={t('Edit deposit')} aria-label={t('Edit deposit')}>{ICONS.edit}</button>
+                )}
+                {!deposit.returnedDate && (
+                  <button type="button" className="icon-btn" onClick={() => setDepMode(depMode === 'return' ? null : 'return')}
+                    title={t('Return deposit')} aria-label={t('Return deposit')}>{ICONS.returnDeposit}</button>
+                )}
+                {depMode && (
+                  <DepositDialog key={depMode} mode={depMode} deposit={deposit} onSubmit={submitDeposit}
+                    onCancel={() => setDepMode(null)} />
+                )}
+              </p>
+            )}
+            {deposit && deposit.returnedDate && (
+              <p className="hint">
+                {t('Returned {amount} on {date}.', { amount: money.format(deposit.returnedAmount), date: deposit.returnedDate })}
+              </p>
+            )}
+            {!deposit && (
+              <div className="actions-inline deposit-actions">
+                <button type="button" onClick={() => setDepMode(depMode === 'pay' ? null : 'pay')}>{t('+ Security deposit')}</button>
+                {depMode === 'pay' && (
+                  <DepositDialog key="pay" mode="pay" deposit={null} onSubmit={submitDeposit}
+                    onCancel={() => setDepMode(null)} />
+                )}
+              </div>
+            )}
+          </div>
+        )}
         </fieldset>
         <fieldset className="renew-tenants">
           <legend>{t('Tenants (tick those occupying)')}</legend>

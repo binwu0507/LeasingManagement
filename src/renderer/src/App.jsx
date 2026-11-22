@@ -5,6 +5,7 @@ import YearlySummary from './components/YearlySummary.jsx';
 import CopyFromYear from './components/CopyFromYear.jsx';
 import AddToYear from './components/AddToYear.jsx';
 import YearSelect from './components/YearSelect.jsx';
+import PaymentsDialog from './components/PaymentsDialog.jsx';
 import Toaster from './components/Toaster.jsx';
 import { toast } from './toast.js';
 import { useT } from './i18n.jsx';
@@ -18,6 +19,7 @@ export default function App() {
   // undefined = dialog closed, object = editing that year record
   const [editing, setEditing] = useState(undefined);
   const [adding, setAdding] = useState(false); // "Add Property…" picker open
+  const [paymentsFor, setPaymentsFor] = useState(null); // year record whose payments are open
   const [copying, setCopying] = useState(false);
   const [tab, setTab] = useState('Properties'); // home page tab: Properties | Tenants
   // Home page dialog: undefined = closed, null = adding, object = editing that house
@@ -160,7 +162,7 @@ export default function App() {
           <button className="primary" onClick={() => { loadAll(); setAdding(true); }}>{t('+ Add Property…')}</button>
         </div>
       </div>
-      <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} />
+      <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} onPayments={setPaymentsFor} />
       <YearlySummary properties={properties} />
     </>
   );
@@ -208,6 +210,10 @@ export default function App() {
           onAdd={addToYear}
           onCancel={() => setAdding(false)}
         />
+      )}
+
+      {year !== null && paymentsFor && (
+        <PaymentsDialog property={paymentsFor} year={year} onClose={() => setPaymentsFor(null)} />
       )}
 
       {year !== null && editing && (

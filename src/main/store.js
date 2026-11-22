@@ -4,7 +4,7 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 19;
+const SCHEMA_VERSION = 21;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
@@ -415,7 +415,72 @@ function init() {
       UPDATE leases SET monthlyRent = monthlyRent / 12;
     `);
   }
+  if (version < 20) {
+    // Payments from tenants against a lease. A rent payment says whether it covers a full month
+    // or a prorated one; a security deposit (at most one per lease) can later be returned.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lease_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        leaseId INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+        paymentType TEXT NOT NULL CHECK (paymentType IN ('Rent', 'Security Deposit')),
+        rentKind TEXT CHECK (rentKind IN ('Full Month', 'Prorate')),
+        amount REAL NOT NULL CHECK (amount >= 0),
+        paymentDate TEXT NOT NULL,
+        returnedDate TEXT,
+        returnedAmount REAL CHECK (returnedAmount IS NULL OR returnedAmount >= 0),
+        CHECK ((paymentType = 'Rent') = (rentKind IS NOT NULL)),
+        CHECK (paymentType = 'Security Deposit' OR returnedDate IS NULL)
+      );
+      CREATE INDEX IF NOT EXISTS idx_lease_payments_lease ON lease_payments (leaseId);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_one_deposit_per_lease
+        ON lease_payments (leaseId) WHERE paymentType = 'Security Deposit';
+    `);
+  }
+  if (version < 21) {
+    // How the tenant paid. Nullable only so payments saved before this step stay valid;
+    // new and edited payments must have one (see validatePayment).
+    db.exec(`
+      ALTER TABLE lease_payments ADD COLUMN paymentMethod TEXT
+        CHECK (paymentMethod IS NULL OR paymentMethod IN ('Check', 'Zelle', 'Direct Deposit', 'Apple Pay', 'Venmo', 'eBay'));
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+const PAYMENT_METHODS = ['Check', 'Zelle', 'Direct Deposit', 'Apple Pay', 'Venmo', 'eBay'];
+const PAYMENT_TYPES = ['Rent', 'Security Deposit'];
+const RENT_KINDS = ['Full Month', 'Prorate'];
+
+// Normalize and check a payment: amount, date, type and (for rent) whether it is a full or prorated month.
+function validatePayment(data) {
+  const d = data || {};
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  const clean = {
+    paymentType: text(d.paymentType),
+    rentKind: text(d.rentKind) || null,
+    amount: d.amount === '' || d.amount === null || d.amount === undefined ? NaN : Number(d.amount),
+    paymentDate: text(d.paymentDate),
+    paymentMethod: text(d.paymentMethod)
+  };
+  if (!PAYMENT_METHODS.includes(clean.paymentMethod)) {
+    throw new Error('Choose a payment method.');
+  }
+  if (!PAYMENT_TYPES.includes(clean.paymentType)) {
+    throw new Error('Payment type must be Rent or Security Deposit.');
+  }
+  if (clean.paymentType === 'Rent' && !RENT_KINDS.includes(clean.rentKind)) {
+    throw new Error('A rent payment must be Full Month or Prorate.');
+  }
+  if (clean.paymentType !== 'Rent') {
+    clean.rentKind = null;
+  }
+  if (!Number.isFinite(clean.amount) || clean.amount < 0) {
+    throw new Error('Payment amount must be a number, 0 or greater.');
+  }
+  if (!isValidDate(clean.paymentDate)) {
+    throw new Error('Payment date must be a valid date.');
+  }
+  return clean;
 }
 
 const TENANT_FIELDS = ['firstName', 'lastName', 'gender', 'ssn', 'dateOfBirth', 'phone', 'email',
@@ -869,7 +934,105 @@ function deleteLease(id) {
   }
 }
 
-const MAX_AGREEMENT_BYTES = 25 * 1024 * 1024;
+// Payments (rent and deposits) of a property's leases dated in the given year, newest first.
+function listYearPayments(propertyId, yearValue) {
+  const year = validYear(yearValue);
+  const names = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
+    WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`);
+  return db.prepare(`
+    SELECT pay.id, pay.leaseId, pay.paymentType, pay.rentKind, pay.amount, pay.paymentDate, pay.paymentMethod,
+      pay.returnedDate, pay.returnedAmount, l.startDate, l.endDate
+    FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
+    WHERE l.propertyId = ? AND (substr(pay.paymentDate, 1, 4) = ? OR substr(pay.returnedDate, 1, 4) = ?)
+    ORDER BY pay.paymentDate DESC, pay.id DESC
+  `).all(propertyId, String(year), String(year)).map((r) => ({
+    ...toPlain(r),
+    tenantNames: names.all(r.leaseId).map((n) => `${n.firstName} ${n.lastName}`)
+  }));
+}
+
+function assertPaymentInYear(clean, yearValue) {
+  const year = validYear(yearValue);
+  if (clean.paymentDate.slice(0, 4) !== String(year)) {
+    throw new Error(`The payment date must be in ${year}.`);
+  }
+}
+
+// Records a rent payment against a lease (deposits are handled by saveDeposit).
+function addRentPayment(leaseId, yearValue, data) {
+  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
+    throw new Error('Lease not found.');
+  }
+  const clean = validatePayment({ ...(data || {}), paymentType: 'Rent' });
+  assertPaymentInYear(clean, yearValue);
+  db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethod)
+    VALUES (?, 'Rent', ?, ?, ?, ?)`).run(leaseId, clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethod);
+}
+
+function updateRentPayment(id, yearValue, data) {
+  if (!db.prepare("SELECT 1 FROM lease_payments WHERE id = ? AND paymentType = 'Rent'").get(id)) {
+    throw new Error('Rent payment not found.');
+  }
+  const clean = validatePayment({ ...(data || {}), paymentType: 'Rent' });
+  assertPaymentInYear(clean, yearValue);
+  db.prepare('UPDATE lease_payments SET rentKind = ?, amount = ?, paymentDate = ?, paymentMethod = ? WHERE id = ?')
+    .run(clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethod, id);
+}
+
+function deleteRentPayment(id) {
+  db.prepare("DELETE FROM lease_payments WHERE id = ? AND paymentType = 'Rent'").run(id);
+}
+
+// Security deposit of a lease: { id, amount, paymentDate, returnedDate, returnedAmount } or null.
+function getDeposit(leaseId) {
+  const row = db.prepare(`SELECT id, amount, paymentDate, paymentMethod, returnedDate, returnedAmount FROM lease_payments
+    WHERE leaseId = ? AND paymentType = 'Security Deposit'`).get(leaseId);
+  return row ? toPlain(row) : null;
+}
+
+// Records the lease's security deposit, or edits it if one was already paid (never a second one).
+function saveDeposit(leaseId, data) {
+  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
+    throw new Error('Lease not found.');
+  }
+  const clean = validatePayment({ ...(data || {}), paymentType: 'Security Deposit' });
+  const existing = getDeposit(leaseId);
+  if (existing) {
+    db.prepare('UPDATE lease_payments SET amount = ?, paymentDate = ?, paymentMethod = ? WHERE id = ?')
+      .run(clean.amount, clean.paymentDate, clean.paymentMethod, existing.id);
+  } else {
+    db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethod)
+      VALUES (?, 'Security Deposit', NULL, ?, ?, ?)`)
+      .run(leaseId, clean.amount, clean.paymentDate, clean.paymentMethod);
+  }
+  return getDeposit(leaseId);
+}
+
+// Marks the paid deposit as returned to the tenant (amount may be less after deductions).
+function returnDeposit(leaseId, data) {
+  const deposit = getDeposit(leaseId);
+  if (!deposit) {
+    throw new Error('No security deposit has been paid on this lease.');
+  }
+  const d = data || {};
+  const returnedDate = typeof d.returnedDate === 'string' ? d.returnedDate.trim() : '';
+  const returnedAmount = d.returnedAmount === '' || d.returnedAmount === null || d.returnedAmount === undefined
+    ? NaN : Number(d.returnedAmount);
+  if (!isValidDate(returnedDate)) {
+    throw new Error('Return date must be a valid date.');
+  }
+  if (returnedDate < deposit.paymentDate) {
+    throw new Error('The return date cannot be before the payment date.');
+  }
+  if (!Number.isFinite(returnedAmount) || returnedAmount < 0 || returnedAmount > deposit.amount) {
+    throw new Error('Returned amount must be between 0 and the deposit amount.');
+  }
+  db.prepare('UPDATE lease_payments SET returnedDate = ?, returnedAmount = ? WHERE id = ?')
+    .run(returnedDate, returnedAmount, deposit.id);
+  return getDeposit(leaseId);
+}
+
+const MAX_AGREEMENT_BYTES =25 * 1024 * 1024;
 
 function setLeaseAgreement(leaseId, fileName, data) {
   if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
@@ -1248,4 +1411,4 @@ function addHousesToYear(yearValue, propertyIds) {
   return added;
 }
 
-module.exports = { init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, deleteTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+module.exports = { listYearPayments, addRentPayment, updateRentPayment, deleteRentPayment, getDeposit, saveDeposit, returnDeposit, init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, deleteTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };

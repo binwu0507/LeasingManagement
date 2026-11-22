@@ -104,6 +104,13 @@ async function pickFile(event, title) {
   const picked = await dialog.showOpenDialog(win, { title, properties: ['openFile'], filters: AGREEMENT_FILTERS });
   return picked.canceled || picked.filePaths.length === 0 ? null : picked.filePaths[0];
 }
+ipcMain.handle('leases:listPayments', (event, propertyId, year) => respond(() => store.listYearPayments(Number(propertyId), year)));
+ipcMain.handle('leases:addPayment', (event, leaseId, year, data) => respond(() => store.addRentPayment(Number(leaseId), year, data)));
+ipcMain.handle('leases:updatePayment', (event, id, year, data) => respond(() => store.updateRentPayment(Number(id), year, data)));
+ipcMain.handle('leases:deletePayment', (event, id) => respond(() => store.deleteRentPayment(Number(id))));
+ipcMain.handle('leases:getDeposit', (event, leaseId) => respond(() => store.getDeposit(Number(leaseId))));
+ipcMain.handle('leases:saveDeposit', (event, leaseId, data) => respond(() => store.saveDeposit(Number(leaseId), data)));
+ipcMain.handle('leases:returnDeposit', (event, leaseId, data) => respond(() => store.returnDeposit(Number(leaseId), data)));
 ipcMain.handle('leases:listDocuments', (event, leaseId) => respond(() => store.listLeaseDocuments(Number(leaseId))));
 ipcMain.handle('leases:addDocument', async (event, leaseId, typeId) => {
   try {

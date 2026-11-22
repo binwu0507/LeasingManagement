@@ -2,7 +2,7 @@ import { ICONS } from '../icons.jsx';
 import { MONEY_COLUMNS, money, optMoney, netIncome, netFormula } from '../finance.js';
 import { useT } from '../i18n.jsx';
 
-export default function PropertyRow({ property: p, onEdit, onDelete }) {
+export default function PropertyRow({ property: p, onEdit, onDelete, onPayments }) {
   const t = useT();
   const net = netIncome(p);
   return (
@@ -15,6 +15,8 @@ export default function PropertyRow({ property: p, onEdit, onDelete }) {
       ))}
       <td className={`num net-cell ${net < 0 ? 'loss' : 'gain'}`} title={netFormula(p, t, net)}>{money.format(net)}</td>
       <td className="row-actions">
+        <button type="button" className="icon-btn" onClick={() => onPayments(p)}
+          title={t('Payments')} aria-label={t('Payments')}>{ICONS.payments}</button>
         <button type="button" className="icon-btn" onClick={() => onEdit(p)}
           title={t('Edit')} aria-label={t('Edit')}>{ICONS.edit}</button>
         <button type="button" className="icon-btn danger" onClick={() => onDelete(p)}
