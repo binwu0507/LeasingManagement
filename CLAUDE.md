@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run dev` — electron-vite dev server with hot reload (opens the Electron window)
 - `npm run build` — build main, preload and renderer into `out/`
 - `npm start` — preview the built app
-- There is no test runner or linter configured (`npm test` is a stub).
+- `npm test` — Vitest, run once (`npm run test:watch` to watch). Tests live in `test/*.test.mjs` and cover `store.js` against an in-memory SQLite database via `store.init(':memory:')` (or a temp file for migration tests). Test data must be made up. Run it from PowerShell or a terminal whose path has a capital drive letter (`C:\...`): from Git Bash (`/c/...`) Vitest fails with "failed to find the runner". There is no linter.
 
 ## Architecture
 

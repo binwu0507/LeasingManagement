@@ -95,7 +95,7 @@ const ZH = {
   'Rent is not late yet: wait until more than 4 days after the 1st.': '尚未逾期：需超过每月1日后4天。',
   'The email could not be sent: {error}': '邮件发送失败：{error}',
   'Email sent.': '邮件已发送。', 'Separate several addresses with commas.': '多个地址请用逗号分隔。', 'The payment was saved, but the email could not be sent: {error}': '收款已保存，但邮件发送失败：{error}',
-  'Financial': '财务', 'Receiving Banks': '收款银行', 'Receiving bank': '收款银行', 'No receiving banks yet.': '暂无收款银行。', 'Receiving bank name': '收款银行名称',
+  'Financial': '财务', 'The date the payment was received': '收款日期', 'Date received': '收款日期', 'No lease': '无租约', 'Receiving Banks': '收款银行', 'Receiving bank': '收款银行', 'No receiving banks yet.': '暂无收款银行。', 'Receiving bank name': '收款银行名称',
   'Add bank': '添加银行', 'Edit bank': '编辑银行', 'Delete bank': '删除银行',
   'Receiving bank added.': '收款银行已添加。', 'Receiving bank saved.': '收款银行已保存。', 'Receiving bank deleted.': '收款银行已删除。',
   'That receiving bank already exists.': '该收款银行已存在。', 'Delete the receiving bank "{name}"?': '删除收款银行“{name}”？',

@@ -92,7 +92,7 @@ const us = (d) => d.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$2/$3/$1');
 
 // Subject and body describing a payment change (see paymentChange in store.js).
 function paymentMail(c) {
-  const line = (p) => `${p.rentKind} rent ${usd(p.amount)} on ${us(p.paymentDate)} (${p.paymentMethod || 'no method'}) to ${p.receivingBank || 'no bank'}`;
+  const line = (p) => `${p.rentKind} rent for ${p.forMonth || 'unknown month'}: ${usd(p.amount)} received ${us(p.paymentDate)} (${p.paymentMethod || 'no method'}) to ${p.receivingBank || 'no bank'}`;
   const house = `${c.address}, ${c.city}${c.state ? `, ${c.state}` : ''}`;
   const verb = { added: 'added', updated: 'updated', deleted: 'deleted' }[c.action];
   const latest = c.after || c.before;
@@ -158,7 +158,7 @@ function lateMail({ monthLabel, today, items }) {
     lines.push(`${n + 1}. ${i.address}, ${i.city}${i.state ? `, ${i.state}` : ''}`,
       `   Tenants: ${i.tenantNames.length ? i.tenantNames.join(', ') : 'none listed'}`,
       `   Lease: ${us(i.leaseStart)} - ${us(i.leaseEnd)}`,
-      `   Rent due: ${usd(i.rentDue)}; paid this month: ${usd(i.paid)}; ${i.paid > 0 ? `still owed: ${usd(i.rentDue - i.paid)}` : 'nothing received'}`, '');
+      `   Rent due: ${usd(i.rentDue)}; paid for this month: ${usd(i.paid)}; ${i.paid > 0 ? `still owed: ${usd(i.rentDue - i.paid)}` : 'nothing received'}`, '');
   });
   const subject = `Late rent reminder: ${items.length} propert${items.length === 1 ? 'y' : 'ies'} - ${monthLabel}`;
   return { subject, body: lines.join('\r\n').trimEnd() };

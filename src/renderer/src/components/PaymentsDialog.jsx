@@ -9,20 +9,11 @@ const RENT_KINDS = ['Full Month', 'Prorate'];
 const pad = (n) => String(n).padStart(2, '0');
 const lastDay = (year, month) => new Date(year, month, 0).getDate(); // month is 1-12
 
-/**
- * The lease a month belongs to: the earliest lease whose term touches it, otherwise the previous
- * lease (so a vacant month between two leases is grouped with the earlier one). Null before the
- * first lease.
- */
+/** The lease a month belongs to: the earliest lease whose term touches it, or null when none does (vacant). */
 function leaseForMonth(leases, year, month) {
   const first = `${year}-${pad(month)}-01`;
   const last = `${year}-${pad(month)}-${pad(lastDay(year, month))}`;
-  const touching = leases.find((l) => l.startDate <= last && l.endDate >= first);
-  if (touching) {
-    return touching;
-  }
-  const before = leases.filter((l) => l.endDate < first);
-  return before.length ? before[before.length - 1] : null;
+  return leases.find((l) => l.startDate <= last && l.endDate >= first) || null;
 }
 
 /** Months 1-12 grouped into runs that share a lease: [{ lease, months: [1, 2, ...] }]. */
@@ -111,13 +102,13 @@ export default function PaymentsDialog({ property, year, onClose }) {
     }
     setForm({
       month, id: null, leaseId: lease.id, rentKind: partial || alreadyPaid ? 'Prorate' : 'Full Month', amount,
-      paymentDate: partial && lease.startDate > first ? from : first, paymentMethodId: String((methods.find((m) => m.name === 'Zelle') || {}).id || ''), receivingBankId: ''
+      forMonth: `${year}-${pad(month)}`, paymentDate: partial && lease.startDate > first ? from : first, paymentMethodId: String((methods.find((m) => m.name === 'Zelle') || {}).id || ''), receivingBankId: ''
     });
   };
 
   const startEdit = (month, p) => setForm({
     month, id: p.id, leaseId: p.leaseId, rentKind: p.rentKind, amount: p.amount,
-    paymentDate: p.paymentDate, paymentMethodId: p.paymentMethodId ? String(p.paymentMethodId) : '',
+    forMonth: p.forMonth, paymentDate: p.paymentDate, paymentMethodId: p.paymentMethodId ? String(p.paymentMethodId) : '',
     receivingBankId: p.receivingBankId ? String(p.receivingBankId) : ''
   });
 
@@ -137,7 +128,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
       return;
     }
     setError('');
-    const data = { rentKind: form.rentKind, amount: form.amount, paymentDate: form.paymentDate, paymentMethodId: form.paymentMethodId, receivingBankId: form.receivingBankId };
+    const data = { forMonth: form.forMonth, rentKind: form.rentKind, amount: form.amount, paymentDate: form.paymentDate, paymentMethodId: form.paymentMethodId, receivingBankId: form.receivingBankId };
     const res = form.id
       ? await window.api.leases.updatePayment(form.id, year, data)
       : await window.api.leases.addPayment(form.leaseId, year, data);
@@ -169,17 +160,19 @@ export default function PaymentsDialog({ property, year, onClose }) {
   }
 
   const monthName = (m) => new Date(year, m - 1, 1).toLocaleString(undefined, { month: 'long' });
-  // Every event of the year: each payment dated in it, plus a "deposit returned" event for a
-  // deposit whose return date falls in it (possibly a different year than the deposit itself).
+  // Every event of the year: each rent payment FOR a month of it (whatever date it was received),
+  // each deposit paid in it, plus a "deposit returned" event for a deposit whose return date falls
+  // in it (possibly a different year than the deposit itself).
   const events = (payments || []).flatMap((p) => {
     const inYear = (d) => d && d.slice(0, 4) === String(year);
-    const out = inYear(p.paymentDate) ? [p] : [];
+    const out = (p.paymentType === 'Rent' ? inYear(p.forMonth) : inYear(p.paymentDate)) ? [p] : [];
     if (p.paymentType === 'Security Deposit' && inYear(p.returnedDate)) {
       out.push({ ...p, isReturn: true, paymentDate: p.returnedDate, amount: p.returnedAmount, paymentMethod: '' });
     }
     return out;
   });
-  const inMonth = (m) => events.filter((p) => Number(p.paymentDate.slice(5, 7)) === m)
+  const monthOf = (p) => Number((p.paymentType === 'Rent' ? p.forMonth : p.paymentDate).slice(5, 7));
+  const inMonth = (m) => events.filter((p) => (p.isReturn ? Number(p.paymentDate.slice(5, 7)) : monthOf(p)) === m)
     .sort((a, b) => a.paymentDate.localeCompare(b.paymentDate) || a.id - b.id || (a.isReturn ? 1 : 0) - (b.isReturn ? 1 : 0));
   const total = (payments || []).filter((p) => p.paymentType === 'Rent').reduce((s, p) => s + p.amount, 0);
 
@@ -197,8 +190,8 @@ export default function PaymentsDialog({ property, year, onClose }) {
   const editCells = (m) => (
     <>
       <td>
-        <input type="date" value={form.paymentDate} min={`${year}-${pad(m)}-01`}
-          max={`${year}-${pad(m)}-${pad(lastDay(year, m))}`} onChange={set('paymentDate')} onKeyDown={onKey} />
+        <input type="date" value={form.paymentDate} onChange={set('paymentDate')} onKeyDown={onKey}
+          title={t('The date the payment was received')} aria-label={t('Date received')} />
       </td>
       <td>
         <select value={form.rentKind} onChange={set('rentKind')} aria-label={t('Rent kind')}>
@@ -313,7 +306,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
                         <span className="chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
                         {g.lease
                           ? `${t('Lease')}: ${usDate(g.lease.startDate)} - ${usDate(g.lease.endDate)} · ${money.format(g.lease.monthlyRent)}/${t('mo')}`
-                          : t('Before the first lease')}
+                          : t('No lease')}
                       </button>
                     </th>
                   </tr>

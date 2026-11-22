@@ -4,7 +4,7 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 24;
+const SCHEMA_VERSION = 25;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
@@ -185,18 +185,20 @@ function validate(data) {
 }
 
 // Open the database and create/migrate the schema.
-function init() {
+// `dbPath` is for tests (a temp file or ':memory:'); the app uses its userData folder.
+function init(dbPath) {
   if (db) {
     return;
   }
-  db = new DatabaseSync(path.join(app.getPath('userData'), 'leasing.db'));
+  const file = dbPath || path.join(app.getPath('userData'), 'leasing.db');
+  db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
 
   const { user_version: version } = db.prepare('PRAGMA user_version').get();
   if (version >= 1 && version < SCHEMA_VERSION) {
     // Existing data is about to be migrated: keep a copy of the database as it was.
-    const backup = path.join(app.getPath('userData'), `leasing.db.bak-v${version}`);
-    if (!fs.existsSync(backup)) {
+    const backup = `${file}.bak-v${version}`;
+    if (file !== ':memory:' && !fs.existsSync(backup)) {
       db.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
     }
   }
@@ -507,6 +509,14 @@ function init() {
       ALTER TABLE lease_payments ADD COLUMN receivingBankId INTEGER REFERENCES receiving_banks(id) ON DELETE RESTRICT;
     `);
   }
+  if (version < 25) {
+    // The month ("YYYY-MM") a rent payment is for, which can differ from the date it was received
+    // (prepaid or late rent). Existing rent payments are assumed to be for the month they were made.
+    db.exec(`
+      ALTER TABLE lease_payments ADD COLUMN forMonth TEXT;
+      UPDATE lease_payments SET forMonth = substr(paymentDate, 1, 7) WHERE paymentType = 'Rent';
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -523,7 +533,8 @@ function validatePayment(data) {
     amount: d.amount === '' || d.amount === null || d.amount === undefined ? NaN : Number(d.amount),
     paymentDate: text(d.paymentDate),
     paymentMethodId: Number(d.paymentMethodId),
-    receivingBankId: Number(d.receivingBankId)
+    receivingBankId: Number(d.receivingBankId),
+    forMonth: text(d.forMonth) || null
   };
   if (!db.prepare('SELECT 1 FROM payment_methods WHERE id = ?').get(clean.paymentMethodId)) {
     throw new Error('Choose a payment method.');
@@ -539,6 +550,9 @@ function validatePayment(data) {
   }
   if (clean.paymentType !== 'Rent') {
     clean.rentKind = null;
+    clean.forMonth = null;
+  } else if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(clean.forMonth || '')) {
+    throw new Error('Choose the month this rent is for.');
   }
   if (!Number.isFinite(clean.amount) || clean.amount < 0) {
     throw new Error('Payment amount must be a number, 0 or greater.');
@@ -1006,23 +1020,37 @@ function listYearPayments(propertyId, yearValue) {
   const names = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
     WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`);
   return db.prepare(`
-    SELECT pay.id, pay.leaseId, pay.paymentType, pay.rentKind, pay.amount, pay.paymentDate, pay.paymentMethodId,
+    SELECT pay.id, pay.leaseId, pay.paymentType, pay.rentKind, pay.amount, pay.paymentDate, pay.forMonth, pay.paymentMethodId,
       pm.name AS paymentMethod, pay.receivingBankId, rb.name AS receivingBank, pay.returnedDate, pay.returnedAmount, l.startDate, l.endDate
     FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
     LEFT JOIN payment_methods pm ON pm.id = pay.paymentMethodId
     LEFT JOIN receiving_banks rb ON rb.id = pay.receivingBankId
-    WHERE l.propertyId = ? AND (substr(pay.paymentDate, 1, 4) = ? OR substr(pay.returnedDate, 1, 4) = ?)
+    WHERE l.propertyId = ? AND (
+      (pay.paymentType = 'Rent' AND substr(pay.forMonth, 1, 4) = ?)
+      OR (pay.paymentType <> 'Rent' AND (substr(pay.paymentDate, 1, 4) = ? OR substr(pay.returnedDate, 1, 4) = ?)))
     ORDER BY pay.paymentDate DESC, pay.id DESC
-  `).all(propertyId, String(year), String(year)).map((r) => ({
+  `).all(propertyId, String(year), String(year), String(year)).map((r) => ({
     ...toPlain(r),
     tenantNames: names.all(r.leaseId).map((n) => `${n.firstName} ${n.lastName}`)
   }));
 }
 
+// Rent can only be recorded for a month the lease covers at least in part (dates inclusive).
+function assertMonthInLease(leaseId, forMonth) {
+  const { startDate, endDate } = db.prepare('SELECT startDate, endDate FROM leases WHERE id = ?').get(leaseId);
+  const [y, m] = forMonth.split('-').map(Number);
+  const first = `${forMonth}-01`;
+  const last = `${forMonth}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
+  if (startDate > last || endDate < first) {
+    throw new Error(`The lease (${startDate} to ${endDate}) does not cover ${forMonth}.`);
+  }
+}
+
+// A rent payment belongs to the year of the month it is for (it may be received in another year).
 function assertPaymentInYear(clean, yearValue) {
   const year = validYear(yearValue);
-  if (clean.paymentDate.slice(0, 4) !== String(year)) {
-    throw new Error(`The payment date must be in ${year}.`);
+  if (clean.forMonth.slice(0, 4) !== String(year)) {
+    throw new Error(`The month must be in ${year}.`);
   }
 }
 
@@ -1047,11 +1075,13 @@ function addRentPayment(leaseId, yearValue, data) {
   }
   const clean = validatePayment({ ...(data || {}), paymentType: 'Rent' });
   assertPaymentInYear(clean, yearValue);
-  db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethodId, receivingBankId)
-    VALUES (?, 'Rent', ?, ?, ?, ?, ?)`)
-    .run(leaseId, clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId);
+  assertMonthInLease(leaseId, clean.forMonth);
+  db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethodId, receivingBankId, forMonth)
+    VALUES (?, 'Rent', ?, ?, ?, ?, ?, ?)`)
+    .run(leaseId, clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, clean.forMonth);
   const year = validYear(yearValue);
-  syncYearRent(db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(leaseId).propertyId, year);
+  // Income counts in the year the money was received, which may differ from the month it is for.
+  syncYearRent(db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(leaseId).propertyId, Number(clean.paymentDate.slice(0, 4)));
   return paymentChange('added', leaseId, year, null, clean);
 }
 
@@ -1072,7 +1102,7 @@ function paymentChange(action, leaseId, year, before, after) {
   const tenantNames = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
     WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`).all(leaseId).map((n) => `${n.firstName} ${n.lastName}`);
   const rec = db.prepare('SELECT yearlyRent FROM property_years WHERE propertyId = ? AND year = ?').get(lease.propertyId, year);
-  const shape = (p) => (p ? { rentKind: p.rentKind, amount: p.amount, paymentDate: p.paymentDate,
+  const shape = (p) => (p ? { rentKind: p.rentKind, amount: p.amount, paymentDate: p.paymentDate, forMonth: p.forMonth,
     paymentMethod: methodName(p.paymentMethodId), receivingBank: bankName(p.receivingBankId) } : null);
   return {
     action, year, address: lease.address, city: lease.city, state: lease.state,
@@ -1082,22 +1112,28 @@ function paymentChange(action, leaseId, year, before, after) {
 }
 
 function updateRentPayment(id, yearValue, data) {
-  const before = db.prepare(`SELECT leaseId, rentKind, amount, paymentDate, paymentMethodId, receivingBankId FROM lease_payments
+  const before = db.prepare(`SELECT leaseId, rentKind, amount, paymentDate, forMonth, paymentMethodId, receivingBankId FROM lease_payments
     WHERE id = ? AND paymentType = 'Rent'`).get(id);
   if (!before) {
     throw new Error('Rent payment not found.');
   }
   const clean = validatePayment({ ...(data || {}), paymentType: 'Rent' });
   assertPaymentInYear(clean, yearValue);
-  db.prepare('UPDATE lease_payments SET rentKind = ?, amount = ?, paymentDate = ?, paymentMethodId = ?, receivingBankId = ? WHERE id = ?')
-    .run(clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, id);
+  if (clean.forMonth !== before.forMonth) {
+    assertMonthInLease(before.leaseId, clean.forMonth); // a payment saved before this rule may keep its month
+  }
+  db.prepare('UPDATE lease_payments SET rentKind = ?, amount = ?, paymentDate = ?, paymentMethodId = ?, receivingBankId = ?, forMonth = ? WHERE id = ?')
+    .run(clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, clean.forMonth, id);
   const year = validYear(yearValue);
-  syncYearRent(db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(before.leaseId).propertyId, year);
+  const propertyId = db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(before.leaseId).propertyId;
+  for (const y of new Set([before.paymentDate.slice(0, 4), clean.paymentDate.slice(0, 4)])) {
+    syncYearRent(propertyId, Number(y));
+  }
   return paymentChange('updated', before.leaseId, year, before, clean);
 }
 
 function deleteRentPayment(id) {
-  const row = db.prepare(`SELECT pay.leaseId, l.propertyId, pay.rentKind, pay.amount, pay.paymentDate, pay.paymentMethodId, pay.receivingBankId
+  const row = db.prepare(`SELECT pay.leaseId, l.propertyId, pay.rentKind, pay.amount, pay.paymentDate, pay.forMonth, pay.paymentMethodId, pay.receivingBankId
     FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
     WHERE pay.id = ? AND pay.paymentType = 'Rent'`).get(id);
   if (!row) {
@@ -1605,14 +1641,18 @@ function addHousesToYear(yearValue, propertyIds) {
   return added;
 }
 
-// Rent still owed for the current month, for the late-payment reminder. A house is late when a lease
-// covers the 1st of the month, more than LATE_AFTER_DAYS days have passed since the 1st, and the rent
-// payments dated in this month add up to less than the lease's monthly rent.
+// Rent still owed for the current month, for the late-payment reminder. A lease is late when it covers
+// part of the month, more than LATE_AFTER_DAYS days have passed since the 1st (or since the lease
+// started within the month), and the rent payments made FOR this month add up to less than the rent
+// due. The rent due is the full monthly rent, or a prorated share when the lease covers only part of
+// the month (same calculation as the default amount in the payments dialog).
 const LATE_AFTER_DAYS = 4;
 function latePayments(now = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
   const month = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const first = `${month}-01`;
+  const last = `${month}-${pad(daysInMonth)}`;
   const report = {
     today: `${month}-${pad(now.getDate())}`,
     monthLabel: now.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
@@ -1624,17 +1664,25 @@ function latePayments(now = new Date()) {
   }
   const leases = db.prepare(`SELECT l.id, l.propertyId, l.startDate, l.endDate, l.monthlyRent, p.address, p.city, p.state
     FROM leases l JOIN properties p ON p.id = l.propertyId
-    WHERE l.startDate <= ? AND l.endDate >= ? ORDER BY p.address, p.city`).all(first, first);
-  const paidIn = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM lease_payments
-    WHERE leaseId = ? AND paymentType = 'Rent' AND substr(paymentDate, 1, 7) = ?`);
+    WHERE l.startDate <= ? AND l.endDate >= ? ORDER BY p.address, p.city`).all(last, first);
+  const paidFor = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM lease_payments
+    WHERE leaseId = ? AND paymentType = 'Rent' AND forMonth = ?`);
   const names = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
     WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`);
   for (const l of leases) {
-    const paid = paidIn.get(l.id, month).total;
-    if (paid + 0.005 < l.monthlyRent) {
+    const from = l.startDate > first ? l.startDate : first;
+    const to = l.endDate < last ? l.endDate : last;
+    const covered = Number(to.slice(8)) - Number(from.slice(8)) + 1;
+    const due = covered >= daysInMonth ? l.monthlyRent : Math.round((l.monthlyRent * covered / daysInMonth) * 100) / 100;
+    // Rent is due from the start of the month, or from the day the lease starts within it.
+    if (now.getDate() - Number(from.slice(8)) <= LATE_AFTER_DAYS) {
+      continue;
+    }
+    const paid = paidFor.get(l.id, month).total;
+    if (paid + 0.005 < due) {
       report.items.push({
         propertyId: l.propertyId, address: l.address, city: l.city, state: l.state, leaseStart: l.startDate, leaseEnd: l.endDate,
-        rentDue: l.monthlyRent, paid, tenantNames: names.all(l.id).map((n) => `${n.firstName} ${n.lastName}`)
+        rentDue: due, paid, tenantNames: names.all(l.id).map((n) => `${n.firstName} ${n.lastName}`)
       });
     }
   }
