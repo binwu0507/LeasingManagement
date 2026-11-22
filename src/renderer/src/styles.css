@@ -868,3 +868,5 @@ tbody tr.row-expiring, tbody tr.row-expiring:hover { background: rgba(251, 146, 
 .payments-table .group-toggle { all: unset; display: flex; align-items: center; gap: 6px; width: 100%; cursor: pointer; font: inherit; }
 .payments-table .group-toggle:focus-visible { outline: 2px solid var(--primary, #2563eb); }
 .payments-table .chevron { display: inline-block; width: 1em; }
+
+.calc-scroll { max-height: 220px; overflow-y: auto; margin-bottom: 8px; }

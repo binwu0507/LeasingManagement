@@ -213,7 +213,7 @@ export default function App() {
       )}
 
       {year !== null && paymentsFor && (
-        <PaymentsDialog property={paymentsFor} year={year} onClose={() => setPaymentsFor(null)} />
+        <PaymentsDialog property={paymentsFor} year={year} onClose={() => { setPaymentsFor(null); refresh(); }} />
       )}
 
       {year !== null && editing && (

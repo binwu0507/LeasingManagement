@@ -1,6 +1,6 @@
 import { ICONS } from '../icons.jsx';
 import { useEffect, useRef, useState } from 'react';
-import { money as formatMoney } from '../finance.js';
+import { money as formatMoney, usDate } from '../finance.js';
 import { useT } from '../i18n.jsx';
 import { US_STATES } from '../usStates.js';
 
@@ -15,28 +15,6 @@ const EMPTY = {
 // The property's own fields; the Save button is enabled only when one of these has changed.
 const HOUSE_KEYS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-// Rent for each month of `year`: every lease's monthly rent, pro-rated by the days of that
-// month the lease covers (vacant months come out as 0).
-function monthlyRents(leases, year) {
-  return MONTHS.map((_, m) => {
-    const days = new Date(year, m + 1, 0).getDate();
-    const first = `${year}-${String(m + 1).padStart(2, '0')}-01`;
-    const last = `${year}-${String(m + 1).padStart(2, '0')}-${String(days).padStart(2, '0')}`;
-    let total = 0;
-    for (const l of leases) {
-      const from = l.startDate > first ? l.startDate : first;
-      const to = l.endDate < last ? l.endDate : last;
-      if (from <= to) {
-        const covered = Number(to.slice(8)) - Number(from.slice(8)) + 1;
-        total += l.monthlyRent * (covered / days);
-      }
-    }
-    return Math.round(total * 100) / 100;
-  });
-}
-
 const CALC_ICON = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
     strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -45,46 +23,54 @@ const CALC_ICON = (
   </svg>
 );
 
-// Calculator icon beside the yearly rent input; its panel lists each month's rent from the leases.
-function RentCalculator({ propertyId, year, onApply }) {
+// Calculator icon beside the yearly rent input; its panel lists the rent payments actually
+// received this year up to today. The yearly rent is that total, kept up to date by the main
+// process whenever payments change, so the input beside it is read-only.
+function RentCalculator({ propertyId, year }) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const [rents, setRents] = useState(null);
+  const [payments, setPayments] = useState(null);
 
   async function toggle() {
     if (open) {
       setOpen(false);
       return;
     }
-    const res = await window.api.leases.list(propertyId);
-    setRents(monthlyRents(res.ok ? res.data : [], year));
+    const res = await window.api.leases.listPayments(propertyId, year);
+    const today = new Date().toISOString().slice(0, 10);
+    setPayments((res.ok ? res.data : [])
+      .filter((p) => p.paymentType === 'Rent' && p.paymentDate <= today)
+      .sort((a, b) => a.paymentDate.localeCompare(b.paymentDate) || a.id - b.id));
     setOpen(true);
   }
-  const total = rents ? Math.round(rents.reduce((a, b) => a + b, 0) * 100) / 100 : 0;
+  const total = payments ? Math.round(payments.reduce((a, p) => a + p.amount, 0) * 100) / 100 : 0;
 
   return (
     <>
       <button type="button" className="icon-btn calc-btn" onClick={toggle}
-        title={t('Calculate from leases')} aria-label={t('Calculate from leases')}>{CALC_ICON}</button>
-      {open && rents && (
-        <div className="calc-panel" role="dialog" aria-label={t('Rent by month')}>
-          <p className="hint">{t('Monthly rent from the leases covering {year}', { year })}</p>
-          <table className="calc-table">
-            <tbody>
-              {rents.map((r, i) => (
-                <tr key={i}>
-                  <td>{t(MONTHS[i])}</td>
-                  <td className="num">{formatMoney.format(r)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr><td>{t('Total')}</td><td className="num">{formatMoney.format(total)}</td></tr>
-            </tfoot>
-          </table>
-          <button type="button" className="primary" onClick={() => { onApply(total); setOpen(false); }}>
-            {t('Apply calculated amount')}
-          </button>
+        title={t('Calculate from payments')} aria-label={t('Calculate from payments')}>{CALC_ICON}</button>
+      {open && payments && (
+        <div className="calc-panel" role="dialog" aria-label={t('Rent payments')}>
+          <p className="hint">{t('Rent payments received in {year} up to today', { year })}</p>
+          {payments.length === 0 && <p className="hint">{t('No rent payments recorded yet.')}</p>}
+          {payments.length > 0 && (
+            <div className="calc-scroll">
+              <table className="calc-table">
+                <tbody>
+                  {payments.map((p) => (
+                    <tr key={p.id}>
+                      <td>{usDate(p.paymentDate)}</td>
+                      <td>{t(p.rentKind)}</td>
+                      <td className="num">{formatMoney.format(p.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr><td colSpan={2}>{t('Total')}</td><td className="num">{formatMoney.format(total)}</td></tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </>
@@ -207,10 +193,10 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
               <label className="rent-field">
                 {t('Yearly rent ($)')}
                 <span className="rent-input">
-                  <input name="yearlyRent" value={values.yearlyRent} onChange={set} {...money} />
+                  <input name="yearlyRent" value={values.yearlyRent} onChange={set} {...money}
+                    disabled={!!property} title={property ? t('Calculated from the rent payments') : undefined} />
                   {property && (
-                    <RentCalculator propertyId={property.propertyId} year={property.year}
-                      onApply={(total) => setValues((v) => ({ ...v, yearlyRent: total }))} />
+                    <RentCalculator propertyId={property.propertyId} year={property.year} />
                   )}
                 </span>
               </label>

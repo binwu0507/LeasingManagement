@@ -958,6 +958,20 @@ function assertPaymentInYear(clean, yearValue) {
   }
 }
 
+// The yearly rent of a house-year is the rent actually received: its rent payments dated in the
+// year up to today. Pass `propertyId` to recompute one house (even down to 0 after deleting its last
+// payment), or null to refresh every house that has rent payments in the year (keeps the figure in
+// step as payment dates pass, and leaves records that never had payments alone).
+function syncYearRent(propertyId, year) {
+  const rentIn = `FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
+    WHERE l.propertyId = property_years.propertyId AND pay.paymentType = 'Rent'
+      AND substr(pay.paymentDate, 1, 4) = CAST(property_years.year AS TEXT)`;
+  db.prepare(`UPDATE property_years SET yearlyRent =
+      (SELECT COALESCE(SUM(pay.amount), 0) ${rentIn} AND pay.paymentDate <= date('now', 'localtime'))
+    WHERE year = ? ${propertyId === null ? `AND EXISTS (SELECT 1 ${rentIn})` : 'AND propertyId = ?'}`)
+    .run(...(propertyId === null ? [year] : [year, propertyId]));
+}
+
 // Records a rent payment against a lease (deposits are handled by saveDeposit).
 function addRentPayment(leaseId, yearValue, data) {
   if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
@@ -967,6 +981,7 @@ function addRentPayment(leaseId, yearValue, data) {
   assertPaymentInYear(clean, yearValue);
   db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethod)
     VALUES (?, 'Rent', ?, ?, ?, ?)`).run(leaseId, clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethod);
+  syncYearRent(db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(leaseId).propertyId, validYear(yearValue));
 }
 
 function updateRentPayment(id, yearValue, data) {
@@ -977,10 +992,19 @@ function updateRentPayment(id, yearValue, data) {
   assertPaymentInYear(clean, yearValue);
   db.prepare('UPDATE lease_payments SET rentKind = ?, amount = ?, paymentDate = ?, paymentMethod = ? WHERE id = ?')
     .run(clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethod, id);
+  syncYearRent(db.prepare(`SELECT l.propertyId FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
+    WHERE pay.id = ?`).get(id).propertyId, validYear(yearValue));
 }
 
 function deleteRentPayment(id) {
-  db.prepare("DELETE FROM lease_payments WHERE id = ? AND paymentType = 'Rent'").run(id);
+  const row = db.prepare(`SELECT l.propertyId, substr(pay.paymentDate, 1, 4) AS year
+    FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
+    WHERE pay.id = ? AND pay.paymentType = 'Rent'`).get(id);
+  if (!row) {
+    return;
+  }
+  db.prepare('DELETE FROM lease_payments WHERE id = ?').run(id);
+  syncYearRent(row.propertyId, Number(row.year));
 }
 
 // Security deposit of a lease: { id, amount, paymentDate, returnedDate, returnedAmount } or null.
@@ -1215,6 +1239,7 @@ function updateProperty(id, data) {
 
 function list(yearValue) {
   const year = validYear(yearValue);
+  syncYearRent(null, year);
   return db.prepare(`${SELECT_RECORD} WHERE y.year = ? ORDER BY y.id`).all(year).map(withItems);
 }
 
@@ -1303,10 +1328,12 @@ function update(id, data) {
   if (!db.prepare('SELECT 1 FROM property_years WHERE id = ?').get(id)) {
     throw new Error('Property not found.');
   }
-  const sets = YEAR_FIELDS.map((f) => `${f} = @${f}`).join(', ');
+  // yearlyRent is derived from the rent payments (see syncYearRent), so it is never set here.
+  const editable = YEAR_FIELDS.filter((f) => f !== 'yearlyRent');
+  const sets = editable.map((f) => `${f} = @${f}`).join(', ');
   db.exec('BEGIN');
   try {
-    db.prepare(`UPDATE property_years SET ${sets} WHERE id = @id`).run({ ...clean, id });
+    db.prepare(`UPDATE property_years SET ${sets} WHERE id = @id`).run({ ...pick(clean, editable), id });
     setRepairItems(id, valid.repairItems);
     db.exec('COMMIT');
   } catch (err) {

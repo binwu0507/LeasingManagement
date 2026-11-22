@@ -88,7 +88,7 @@ const ZH = {
   'Full Month': '整月', 'Prorate': '按比例', 'Rent kind': '租金类型', 'No payments recorded for this year.': '本年度没有收款记录。',
   'Add payment': '添加收款', 'Update payment': '更新收款', 'Payment saved.': '收款已保存。', 'Payment deleted.': '收款已删除。',
   'This property has no leases to record payments against. Add a lease first.': '该房产没有租约，无法记录收款。请先添加租约。',
-  'Month': '月份', 'Deposit returned': '退还押金', 'Before the first lease': '首份租约之前', 'mo': '月', 'Total received': '收款合计', 'Delete this payment?': '删除这笔收款？', 'Deposits are managed on the lease.': '押金请在租约中管理。',
+  'Calculate from payments': '按实际收款计算', 'Calculated from the rent payments': '根据租金收款自动计算', 'Rent payments': '租金收款', 'Rent payments received in {year} up to today': '{year} 年截至今天已收到的租金', 'No rent payments recorded yet.': '尚无租金收款记录。', 'Month': '月份', 'Deposit returned': '退还押金', 'Before the first lease': '首份租约之前', 'mo': '月', 'Total received': '收款合计', 'Delete this payment?': '删除这笔收款？', 'Deposits are managed on the lease.': '押金请在租约中管理。',
   'Pick a tenant': '选择租客', 'Name contains': '姓名包含', 'Type part of a tenant name.': '请输入租客姓名的一部分。',
   'No matching tenants.': '没有匹配的租客。', 'Add selected': '添加所选',
   '{start} to {end}': '{start} 至 {end}',
