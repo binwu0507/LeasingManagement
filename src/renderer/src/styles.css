@@ -870,3 +870,7 @@ tbody tr.row-expiring, tbody tr.row-expiring:hover { background: rgba(251, 146, 
 .payments-table .chevron { display: inline-block; width: 1em; }
 
 .calc-scroll { max-height: 220px; overflow-y: auto; margin-bottom: 8px; }
+
+.email-form { display: flex; flex-direction: column; gap: 8px; max-width: 420px; }
+.email-form label { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.email-form .hint { margin: 0; }

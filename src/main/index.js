@@ -33,6 +33,32 @@ function respond(action) {
   }
 }
 
+const mail = require('./mail');
+
+// Runs a rent-payment change; once it is saved, shows the notification email for confirmation and
+// sends it. The renderer gets { mail: { status, error? } } to report what happened.
+async function respondAndMail(event, action) {
+  let change;
+  try {
+    change = action();
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return { ok: true, data: { mail: await mail.confirmAndSend(change, win) } };
+}
+
+ipcMain.handle('mail:getSettings', () => respond(() => mail.getSettings()));
+ipcMain.handle('mail:saveSettings', (event, data) => respond(() => mail.saveSettings(data)));
+ipcMain.handle('mail:test', async () => {
+  try {
+    await mail.sendTest();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('years:list', () => respond(() => store.listYears()));
 ipcMain.handle('years:add', (event, year) => respond(() => store.addYear(year)));
 ipcMain.handle('leases:list', (event, propertyId) => respond(() => store.listLeases(propertyId)));
@@ -105,9 +131,9 @@ async function pickFile(event, title) {
   return picked.canceled || picked.filePaths.length === 0 ? null : picked.filePaths[0];
 }
 ipcMain.handle('leases:listPayments', (event, propertyId, year) => respond(() => store.listYearPayments(Number(propertyId), year)));
-ipcMain.handle('leases:addPayment', (event, leaseId, year, data) => respond(() => store.addRentPayment(Number(leaseId), year, data)));
-ipcMain.handle('leases:updatePayment', (event, id, year, data) => respond(() => store.updateRentPayment(Number(id), year, data)));
-ipcMain.handle('leases:deletePayment', (event, id) => respond(() => store.deleteRentPayment(Number(id))));
+ipcMain.handle('leases:addPayment', (event, leaseId, year, data) => respondAndMail(event, () => store.addRentPayment(Number(leaseId), year, data)));
+ipcMain.handle('leases:updatePayment', (event, id, year, data) => respondAndMail(event, () => store.updateRentPayment(Number(id), year, data)));
+ipcMain.handle('leases:deletePayment', (event, id) => respondAndMail(event, () => store.deleteRentPayment(Number(id))));
 ipcMain.handle('leases:getDeposit', (event, leaseId) => respond(() => store.getDeposit(Number(leaseId))));
 ipcMain.handle('leases:saveDeposit', (event, leaseId, data) => respond(() => store.saveDeposit(Number(leaseId), data)));
 ipcMain.handle('leases:returnDeposit', (event, leaseId, data) => respond(() => store.returnDeposit(Number(leaseId), data)));

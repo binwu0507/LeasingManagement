@@ -981,30 +981,53 @@ function addRentPayment(leaseId, yearValue, data) {
   assertPaymentInYear(clean, yearValue);
   db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethod)
     VALUES (?, 'Rent', ?, ?, ?, ?)`).run(leaseId, clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethod);
-  syncYearRent(db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(leaseId).propertyId, validYear(yearValue));
+  const year = validYear(yearValue);
+  syncYearRent(db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(leaseId).propertyId, year);
+  return paymentChange('added', leaseId, year, null, clean);
+}
+
+// What changed, for the notification email: the house, lease, tenants, the payment before/after
+// (null when it did not exist) and the year's rent received so far.
+function paymentChange(action, leaseId, year, before, after) {
+  const lease = db.prepare(`SELECT l.propertyId, l.startDate, l.endDate, p.address, p.city, p.state
+    FROM leases l JOIN properties p ON p.id = l.propertyId WHERE l.id = ?`).get(leaseId);
+  const tenantNames = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
+    WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`).all(leaseId).map((n) => `${n.firstName} ${n.lastName}`);
+  const rec = db.prepare('SELECT yearlyRent FROM property_years WHERE propertyId = ? AND year = ?').get(lease.propertyId, year);
+  const shape = (p) => (p ? { rentKind: p.rentKind, amount: p.amount, paymentDate: p.paymentDate, paymentMethod: p.paymentMethod } : null);
+  return {
+    action, year, address: lease.address, city: lease.city, state: lease.state,
+    leaseStart: lease.startDate, leaseEnd: lease.endDate, tenantNames,
+    before: shape(before), after: shape(after), yearlyRent: rec ? rec.yearlyRent : null
+  };
 }
 
 function updateRentPayment(id, yearValue, data) {
-  if (!db.prepare("SELECT 1 FROM lease_payments WHERE id = ? AND paymentType = 'Rent'").get(id)) {
+  const before = db.prepare(`SELECT leaseId, rentKind, amount, paymentDate, paymentMethod FROM lease_payments
+    WHERE id = ? AND paymentType = 'Rent'`).get(id);
+  if (!before) {
     throw new Error('Rent payment not found.');
   }
   const clean = validatePayment({ ...(data || {}), paymentType: 'Rent' });
   assertPaymentInYear(clean, yearValue);
   db.prepare('UPDATE lease_payments SET rentKind = ?, amount = ?, paymentDate = ?, paymentMethod = ? WHERE id = ?')
     .run(clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethod, id);
-  syncYearRent(db.prepare(`SELECT l.propertyId FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
-    WHERE pay.id = ?`).get(id).propertyId, validYear(yearValue));
+  const year = validYear(yearValue);
+  syncYearRent(db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(before.leaseId).propertyId, year);
+  return paymentChange('updated', before.leaseId, year, before, clean);
 }
 
 function deleteRentPayment(id) {
-  const row = db.prepare(`SELECT l.propertyId, substr(pay.paymentDate, 1, 4) AS year
+  const row = db.prepare(`SELECT pay.leaseId, l.propertyId, pay.rentKind, pay.amount, pay.paymentDate, pay.paymentMethod
     FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
     WHERE pay.id = ? AND pay.paymentType = 'Rent'`).get(id);
   if (!row) {
-    return;
+    return null;
   }
+  const year = Number(row.paymentDate.slice(0, 4));
   db.prepare('DELETE FROM lease_payments WHERE id = ?').run(id);
-  syncYearRent(row.propertyId, Number(row.year));
+  syncYearRent(row.propertyId, year);
+  return paymentChange('deleted', row.leaseId, year, row, null);
 }
 
 // Security deposit of a lease: { id, amount, paymentDate, returnedDate, returnedAmount } or null.

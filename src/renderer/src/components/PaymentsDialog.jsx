@@ -116,6 +116,16 @@ export default function PaymentsDialog({ property, year, onClose }) {
     paymentDate: p.paymentDate, paymentMethod: p.paymentMethod || ''
   });
 
+  // Tells the user what happened to the notification email (the payment itself is already saved).
+  function reportMail(data) {
+    const m = data && data.mail;
+    if (m && m.status === 'sent') {
+      toast(t('Email sent.'));
+    } else if (m && m.status === 'failed') {
+      setError(t('The payment was saved, but the email could not be sent: {error}', { error: m.error }));
+    }
+  }
+
   async function save(e) {
     e.preventDefault();
     if (!form) {
@@ -133,6 +143,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
     toast(t('Payment saved.'));
     setForm(null);
     load();
+    reportMail(res.data);
   }
 
   async function remove(p) {
@@ -145,6 +156,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
       return;
     }
     toast(t('Payment deleted.'));
+    reportMail(res.data);
     if (form && form.id === p.id) {
       setForm(null);
     }

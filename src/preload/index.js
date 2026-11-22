@@ -29,6 +29,11 @@ contextBridge.exposeInMainWorld('api', {
     downloadAllDocuments: (leaseId) => ipcRenderer.invoke('leases:downloadAllDocuments', leaseId),
     removeDocument: (docId) => ipcRenderer.invoke('leases:removeDocument', docId)
   },
+  mail: {
+    getSettings: () => ipcRenderer.invoke('mail:getSettings'),
+    saveSettings: (data) => ipcRenderer.invoke('mail:saveSettings', data),
+    test: () => ipcRenderer.invoke('mail:test')
+  },
   documentTypes: {
     list: () => ipcRenderer.invoke('documentTypes:list'),
     add: (name) => ipcRenderer.invoke('documentTypes:add', name),

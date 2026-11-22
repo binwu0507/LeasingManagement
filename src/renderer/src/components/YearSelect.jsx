@@ -4,6 +4,7 @@ import MapDialog from './MapDialog.jsx';
 import ManageLeaseDialog from './ManageLeaseDialog.jsx';
 import TenantsPage from './TenantsPage.jsx';
 import DocumentTypesAdmin from './DocumentTypesAdmin.jsx';
+import EmailSettings from './EmailSettings.jsx';
 import { usDate } from '../finance.js';
 import { useT, usePrefs } from '../i18n.jsx';
 
@@ -150,6 +151,7 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
             {error && <p className="error">{error}</p>}
           </section>
           <DocumentTypesAdmin />
+          <EmailSettings />
           </>
           ) : yearView ? yearView : <>
         <div className="section-head">
