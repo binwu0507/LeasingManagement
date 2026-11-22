@@ -68,6 +68,43 @@ describe('tenants and leases', () => {
   });
 });
 
+describe('vacant days', () => {
+  const vacant = (p, year) => {
+    store.addYear(year);
+    store.addHousesToYear(year, [p.id]);
+    return store.list(year).find((r) => r.propertyId === p.id).vacantDays;
+  };
+
+  it('counts every day of the year when there is no lease', () => {
+    expect(vacant(store.addProperty(house()), 2025)).toBe(365);
+    expect(vacant(store.addProperty(house()), 2024)).toBe(366); // leap year
+  });
+
+  it('counts only the days no lease covers, with inclusive dates', () => {
+    const p = store.addProperty(house());
+    store.addLease(p.id, lease({ startDate: '2025-03-01', endDate: '2025-08-31' })); // 184 days
+    expect(vacant(p, 2025)).toBe(365 - 184);
+  });
+
+  it('adds up several leases and clips leases that cross the year boundary', () => {
+    const p = store.addProperty(house());
+    store.addLease(p.id, lease({ startDate: '2024-11-01', endDate: '2025-01-31' })); // 31 days in 2025
+    store.addLease(p.id, lease({ startDate: '2025-07-01', endDate: '2026-06-30' })); // 184 days in 2025
+    expect(vacant(p, 2025)).toBe(365 - 31 - 184);
+  });
+
+  it('is zero for a year fully covered by a lease', () => {
+    const p = store.addProperty(house());
+    store.addLease(p.id, lease({ startDate: '2025-01-01', endDate: '2025-12-31' }));
+    expect(vacant(p, 2025)).toBe(0);
+  });
+
+  it('does not count days before the purchase date', () => {
+    const p = store.addProperty(house({ purchaseDate: '2025-07-01' }));
+    expect(vacant(p, 2025)).toBe(184); // 1 Jul - 31 Dec
+  });
+});
+
 describe('properties', () => {
   it('rejects a duplicate address, city and zip regardless of case', () => {
     store.addProperty(house({ address: '1 Main St', city: 'Town', zip: '11111' }));

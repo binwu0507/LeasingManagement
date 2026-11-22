@@ -43,6 +43,7 @@ export function annualTotals(properties) {
   for (const col of MONEY_COLUMNS) {
     totals[col.field] = sum(properties, col.field) * (col.monthly ? 12 : 1);
   }
+  totals.vacantDays = sum(properties, 'vacantDays');
   totals.net = properties.reduce((t, p) => t + netIncome(p), 0);
   return totals;
 }

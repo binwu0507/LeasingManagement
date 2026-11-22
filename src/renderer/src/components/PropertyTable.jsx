@@ -43,7 +43,9 @@ export default function PropertyTable({ properties, onEdit, onDelete, onPayments
       <thead>
         <tr>
           <th>{t('Address')}</th>
-          {MONEY_COLUMNS.map((col) => <Fragment key={col.field}>{header(col.field, col.header)}</Fragment>)}
+          {MONEY_COLUMNS.map((col, i) => (
+            <Fragment key={col.field}>{header(col.field, col.header)}{i === 0 && header('vacantDays', 'Vacant Days')}</Fragment>
+          ))}
           {header('net', 'Net / yr')}
           <th>{t('Actions')}</th>
         </tr>
@@ -56,8 +58,11 @@ export default function PropertyTable({ properties, onEdit, onDelete, onPayments
       <tfoot>
         <tr>
           <td>{t('Annual totals')}</td>
-          {MONEY_COLUMNS.map((col) => (
-            <td key={col.field} className="num">{money.format(totals[col.field])}</td>
+          {MONEY_COLUMNS.map((col, i) => (
+            <Fragment key={col.field}>
+              <td className="num">{money.format(totals[col.field])}</td>
+              {i === 0 && <td className="num">{totals.vacantDays}</td>}
+            </Fragment>
           ))}
           <td className={`num net-cell ${totals.net < 0 ? 'loss' : 'gain'}`} title={netFormula(totals, t, totals.net)}>
             {money.format(totals.net)}

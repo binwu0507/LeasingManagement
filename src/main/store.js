@@ -1445,13 +1445,35 @@ function get(id) {
   return withItems(db.prepare(`${SELECT_RECORD} WHERE y.id = ?`).get(id));
 }
 
-// A yearly record plus its itemized repairs (oldest first).
+// Days of the year not covered by any lease of the house (lease dates inclusive). Leases of one
+// house never overlap, so their covered days can simply be added up. A house bought during the
+// year is only counted from its purchase date.
+function vacantDays(propertyId, year, purchaseDate) {
+  const day = (iso) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000;
+  const first = `${year}-01-01`;
+  const last = `${year}-12-31`;
+  const from = purchaseDate && purchaseDate > first ? purchaseDate : first;
+  if (from > last) {
+    return 0;
+  }
+  let covered = 0;
+  for (const l of db.prepare('SELECT startDate, endDate FROM leases WHERE propertyId = ?').all(propertyId)) {
+    const s = l.startDate > from ? l.startDate : from;
+    const e = l.endDate < last ? l.endDate : last;
+    if (s <= e) {
+      covered += day(e) - day(s) + 1;
+    }
+  }
+  return day(last) - day(from) + 1 - covered;
+}
+
+// A yearly record plus its itemized repairs (oldest first) and its vacant days.
 function withItems(row) {
   const repairItems = db.prepare(`
     SELECT id, date, amount, contractor, description FROM repair_items
     WHERE propertyYearId = ? ORDER BY date, id
   `).all(row.id).map(toPlain);
-  return { ...row, repairItems };
+  return { ...row, repairItems, vacantDays: vacantDays(row.propertyId, row.year, row.purchaseDate) };
 }
 
 // Replace a record's repair items with the given (already validated) list.
