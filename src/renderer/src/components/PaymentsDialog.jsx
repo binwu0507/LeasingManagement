@@ -211,7 +211,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
         </select>
       </td>
       <td className="row-actions">
-        <button type="button" className="icon-btn" onClick={save} title={t('Save')} aria-label={t('Save')}>{ICONS.check}</button>
+        <button type="button" className="icon-btn ok" onClick={save} title={t('Save')} aria-label={t('Save')}>{ICONS.check}</button>
         <button type="button" className="icon-btn danger" onClick={() => setForm(null)}
           title={t('Cancel')} aria-label={t('Cancel')}>{ICONS.remove}</button>
       </td>
@@ -227,7 +227,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
       <td className="row-actions">
         {p.paymentType === 'Rent' ? (
           <>
-            <button type="button" className="icon-btn" onClick={() => startEdit(m, p)}
+            <button type="button" className="icon-btn edit" onClick={() => startEdit(m, p)}
               title={t('Edit')} aria-label={t('Edit')}>{ICONS.edit}</button>
             <button type="button" className="icon-btn danger" onClick={() => remove(p)}
               title={t('Delete')} aria-label={t('Delete')}>{ICONS.trash}</button>
@@ -244,11 +244,13 @@ export default function PaymentsDialog({ property, year, onClose }) {
     const rowCount = Math.max(1, list.length + (drafting ? 1 : 0));
     const monthCell = (
       <td className="month-cell" rowSpan={rowCount}>
-        <span>{monthName(m)}</span>
-        {lease && (
-          <button type="button" className="icon-btn" onClick={() => startAdd(m, lease)} disabled={drafting}
-            title={t('Add payment')} aria-label={`${t('Add payment')} — ${monthName(m)}`}>{ICONS.add}</button>
-        )}
+        <div className="month-cell-inner">
+          <span>{monthName(m)}</span>
+          {lease && (
+            <button type="button" className="icon-btn add" onClick={() => startAdd(m, lease)} disabled={drafting}
+              title={t('Add payment')} aria-label={`${t('Add payment')} — ${monthName(m)}`}>{ICONS.add}</button>
+          )}
+        </div>
       </td>
     );
     const rows = list.map((p) => (

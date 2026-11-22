@@ -1,4 +1,3 @@
-import { ICONS } from '../icons.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { money as formatMoney, usDate } from '../finance.js';
 import { useT } from '../i18n.jsx';
@@ -8,8 +7,7 @@ const EMPTY = {
   address: '', city: '', state: '', zip: '',
   bedrooms: 0, bathrooms: 0, sqft: 0, purchaseDate: '',
   yearlyRent: 0, mortgage: 0, yearlyHoa: 0, propertyTax: 0,
-  insurance: '', mortgageInterest: '',
-  repairItems: []
+  insurance: '', mortgageInterest: ''
 };
 
 // The property's own fields; the Save button is enabled only when one of these has changed.
@@ -77,14 +75,8 @@ function RentCalculator({ propertyId, year }) {
   );
 }
 
-const EMPTY_ITEM = { date: '', amount: '', contractor: '', description: '' };
-
 // Convert a stored property (nulls for blank optionals) into form values
-const toForm = (p) => ({
-  ...Object.fromEntries(Object.keys(EMPTY).map((k) => [k, p[k] ?? ''])),
-  repairItems: (p.repairItems || []).map(({ date, amount, contractor, description }) =>
-    ({ date, amount, contractor, description }))
-});
+const toForm = (p) => Object.fromEntries(Object.keys(EMPTY).map((k) => [k, p[k] ?? '']));
 
 /**
  * Add/edit dialog. `property` is the house being edited, or null when adding.
@@ -96,7 +88,6 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
   const [initial] = useState(() => (property ? toForm(property) : EMPTY));
   const [values, setValues] = useState(initial);
   const [error, setError] = useState('');
-  const [sort, setSort] = useState(null); // { key: 'date' | 'amount', dir: 1 | -1 }; last header click
   // Property editing only: Save is enabled once a property field differs from what was loaded.
   const dirty = HOUSE_KEYS.some((k) => String(values[k]) !== String(initial[k]));
 
@@ -116,29 +107,6 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
       setError(err);
     }
   }
-
-  const setItem = (i, e) => setValues((v) => ({
-    ...v,
-    repairItems: v.repairItems.map((it, j) => (j === i ? { ...it, [e.target.name]: e.target.value } : it))
-  }));
-  const addItem = () => {
-    setSort(null);
-    setValues((v) => ({ ...v, repairItems: [...v.repairItems, EMPTY_ITEM] }));
-  };
-  // Reorders the rows once per click (rows don't jump around while you are typing in them).
-  const sortBy = (key) => {
-    const dir = sort && sort.key === key ? -sort.dir : 1;
-    setSort({ key, dir });
-    setValues((v) => ({
-      ...v,
-      repairItems: [...v.repairItems].sort((a, b) =>
-        dir * (key === 'amount' ? (Number(a.amount) || 0) - (Number(b.amount) || 0)
-                                : a.date.localeCompare(b.date)))
-    }));
-  };
-  const arrow = (key) => (sort && sort.key === key ? (sort.dir === 1 ? ' ▲' : ' ▼') : '');
-  const removeItem = (i) => setValues((v) => ({ ...v, repairItems: v.repairItems.filter((_, j) => j !== i) }));
-  const repairTotal = values.repairItems.reduce((t, it) => t + (Number(it.amount) || 0), 0);
 
   const field = (label, name, props = {}) => (
     <label>
@@ -211,42 +179,6 @@ export default function PropertyForm({ property, onSave, onCancel, houseOnly = f
               {field('Insurance ($/year)', 'insurance', money)}
               {field('Mortgage interest ($/year)', 'mortgageInterest', money)}
             </div>
-
-            <fieldset className="repairs">
-              <legend>{t('Total repair cost: {total}', { total: formatMoney.format(repairTotal) })}</legend>
-              {values.repairItems.length > 0 && (
-                <div className="repair-scroll">
-                  <table className="repair-table">
-                    <thead>
-                      <tr>
-                        <th><button type="button" className="link" onClick={() => sortBy('date')}>{t('Date')}{arrow('date')}</button></th>
-                        <th><button type="button" className="link" onClick={() => sortBy('amount')}>{t('Amount ($)')}{arrow('amount')}</button></th>
-                        <th>{t('Contractor')}</th>
-                        <th>{t('Description')}</th>
-                        <th />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {values.repairItems.map((it, i) => (
-                        <tr key={i}>
-                          <td><input type="date" name="date" value={it.date} onChange={(e) => setItem(i, e)}
-                            aria-label={t('Repair date')} /></td>
-                          <td><input type="number" name="amount" min={0} step={0.01} value={it.amount}
-                            onChange={(e) => setItem(i, e)} aria-label={t('Repair amount')} /></td>
-                          <td><input type="text" name="contractor" value={it.contractor}
-                            onChange={(e) => setItem(i, e)} aria-label={t('Contractor')} /></td>
-                          <td><input type="text" name="description" value={it.description}
-                            onChange={(e) => setItem(i, e)} aria-label={t('Repair description')} /></td>
-                          <td><button type="button" className="icon-btn danger" onClick={() => removeItem(i)}
-                            title={t('Remove item')} aria-label={t('Remove repair item')}>{ICONS.remove}</button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              <button type="button" onClick={addItem}>{t('+ Add repair')}</button>
-            </fieldset>
           </>
         )}
 

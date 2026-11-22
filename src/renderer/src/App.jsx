@@ -6,6 +6,7 @@ import CopyFromYear from './components/CopyFromYear.jsx';
 import AddToYear from './components/AddToYear.jsx';
 import YearSelect from './components/YearSelect.jsx';
 import PaymentsDialog from './components/PaymentsDialog.jsx';
+import RepairCostDialog from './components/RepairCostDialog.jsx';
 import Toaster from './components/Toaster.jsx';
 import { toast } from './toast.js';
 import { useT } from './i18n.jsx';
@@ -20,6 +21,7 @@ export default function App() {
   const [editing, setEditing] = useState(undefined);
   const [adding, setAdding] = useState(false); // "Add Property…" picker open
   const [paymentsFor, setPaymentsFor] = useState(null); // year record whose payments are open
+  const [repairsFor, setRepairsFor] = useState(null); // year record whose repair costs are open
   const [copying, setCopying] = useState(false);
   const [tab, setTab] = useState('Properties'); // home page tab: Properties | Tenants
   // Home page dialog: undefined = closed, null = adding, object = editing that house
@@ -80,6 +82,21 @@ export default function App() {
       return res.error;
     }
     setEditing(undefined);
+    refresh();
+    toast(t('Saved.'));
+  }
+
+  // Saves the repair items of one year record; the yearly figures are sent back unchanged.
+  async function saveRepairs(items) {
+    const p = repairsFor;
+    const figures = Object.fromEntries(
+      ['yearlyRent', 'propertyTax', 'yearlyHoa', 'mortgage', 'insurance', 'mortgageInterest'].map((f) => [f, p[f] ?? ''])
+    );
+    const res = await window.api.properties.update(p.id, { ...figures, repairItems: items });
+    if (!res.ok) {
+      return res.error;
+    }
+    setRepairsFor(null);
     refresh();
     toast(t('Saved.'));
   }
@@ -162,7 +179,7 @@ export default function App() {
           <button className="primary" onClick={() => { loadAll(); setAdding(true); }}>{t('+ Add Property…')}</button>
         </div>
       </div>
-      <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} onPayments={setPaymentsFor} />
+      <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} onPayments={setPaymentsFor} onRepairs={setRepairsFor} />
       <YearlySummary properties={properties} />
     </>
   );
@@ -214,6 +231,15 @@ export default function App() {
 
       {year !== null && paymentsFor && (
         <PaymentsDialog property={paymentsFor} year={year} onClose={() => { setPaymentsFor(null); refresh(); }} />
+      )}
+
+      {year !== null && repairsFor && (
+        <RepairCostDialog
+          key={repairsFor.id}
+          property={repairsFor}
+          onSave={saveRepairs}
+          onCancel={() => setRepairsFor(null)}
+        />
       )}
 
       {year !== null && editing && (

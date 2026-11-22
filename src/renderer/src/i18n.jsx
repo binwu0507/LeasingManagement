@@ -90,6 +90,7 @@ const ZH = {
   'This property has no leases to record payments against. Add a lease first.': '该房产没有租约，无法记录收款。请先添加租约。',
   'Calculate from payments': '按实际收款计算', 'Calculated from the rent payments': '根据租金收款自动计算', 'Rent payments': '租金收款', 'Rent payments received in {year} up to today': '{year} 年截至今天已收到的租金', 'No rent payments recorded yet.': '尚无租金收款记录。', 'Month': '月份', 'Deposit returned': '退还押金',
   'Rent for this month is not fully paid': '本月租金未付清', 'Late payment': '租金逾期',
+  'Repair item {n}: the date must be in {year}.': '第 {n} 项维修：日期必须在 {year} 年内。', 'Done': '完成', 'Repair cost': '维修费用',
   'Late Payment Reminder': '逾期租金提醒', 'No late payments this month.': '本月没有逾期未付的租金。',
   'Rent is not late yet: wait until more than 4 days after the 1st.': '尚未逾期：需超过每月1日后4天。',
   'The email could not be sent: {error}': '邮件发送失败：{error}',

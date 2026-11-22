@@ -54,6 +54,15 @@ function cleanRepairItems(items) {
   });
 }
 
+// Every repair must be dated in the year of the record it belongs to.
+function assertRepairsInYear(items, year) {
+  items.forEach((it, i) => {
+    if (it.date.slice(0, 4) !== String(year)) {
+      throw new Error(`Repair item ${i + 1}: the date must be in ${year}.`);
+    }
+  });
+}
+
 // Normalize and check a property's leasing contracts. Start/end dates and rent are required;
 // move-in/move-out dates and tenant names are optional.
 function cleanLeases(leases) {
@@ -1304,6 +1313,7 @@ function setPropertyFields(propertyId, clean, fields = PROPERTY_FIELDS) {
 function add(yearValue, data) {
   const year = validYear(yearValue);
   const clean = validate(data);
+  assertRepairsInYear(clean.repairItems, year);
   addYear(year);
 
   // Same address/city/zip as an existing house -> same property; otherwise a new one.
@@ -1349,16 +1359,20 @@ function update(id, data) {
   const house = { address: 'x', city: 'x', bedrooms: 0, bathrooms: 0, sqft: 0 };
   const valid = validate({ ...house, ...pick(data || {}, [...YEAR_FIELDS, 'repairItems']) });
   const clean = pick(valid, YEAR_FIELDS);
-  if (!db.prepare('SELECT 1 FROM property_years WHERE id = ?').get(id)) {
+  const record = db.prepare('SELECT year FROM property_years WHERE id = ?').get(id);
+  if (!record) {
     throw new Error('Property not found.');
   }
+  assertRepairsInYear(valid.repairItems, record.year);
   // yearlyRent is derived from the rent payments (see syncYearRent), so it is never set here.
   const editable = YEAR_FIELDS.filter((f) => f !== 'yearlyRent');
   const sets = editable.map((f) => `${f} = @${f}`).join(', ');
   db.exec('BEGIN');
   try {
     db.prepare(`UPDATE property_years SET ${sets} WHERE id = @id`).run({ ...pick(clean, editable), id });
-    setRepairItems(id, valid.repairItems);
+    if (Array.isArray((data || {}).repairItems)) { // omitted = leave the repair items alone
+      setRepairItems(id, valid.repairItems);
+    }
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');

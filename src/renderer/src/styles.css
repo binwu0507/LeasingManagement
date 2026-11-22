@@ -520,7 +520,10 @@ dialog.history-dialog { width: min(1100px, 95vw); max-width: 95vw; }
 .repair-table input { margin: 0; padding: 4px 6px; font-size: 0.8rem; min-width: 0; }
 .repair-table th:nth-child(1), .repair-table td:nth-child(1) { width: 118px; }
 .repair-table th:nth-child(2), .repair-table td:nth-child(2) { width: 84px; }
-.repair-table th:nth-child(5), .repair-table td:nth-child(5) { width: 24px; }
+.repair-table th:nth-child(5), .repair-table td:nth-child(5) { width: 76px; white-space: nowrap; }
+.repair-table td:not(.row-actions) { padding: 6px 8px; }
+.repair-table tr.editing td:not(.row-actions) { padding: 2px 4px; }
+.repair-table td.num { text-align: right; }
 .repair-table th button.link:hover { color: var(--text); text-decoration: underline; }
 
 /* Add-to-year picker */
@@ -865,7 +868,11 @@ tbody tr.row-expiring, tbody tr.row-expiring:hover { background: rgba(251, 146, 
 .payments-table tbody tr:hover { background: transparent; }
 .payments-table .lease-row th { background: var(--surface-alt); text-transform: none; letter-spacing: 0; font-size: 0.85rem; text-align: left; }
 .payments-table .month-cell { width: 130px; font-weight: 600; border-right: 1px solid var(--border); vertical-align: top; }
-.payments-table .month-cell span { margin-right: 6px; }
+.payments-table .month-cell-inner { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.icon-btn.add, .icon-btn.ok { color: #16a34a; }
+.icon-btn.edit { color: #2563eb; }
+:root[data-theme="dark"] .icon-btn.add, :root[data-theme="dark"] .icon-btn.ok { color: #4ade80; }
+:root[data-theme="dark"] .icon-btn.edit { color: #60a5fa; }
 .payments-table tr.editing { background: var(--surface-alt); }
 .payments-table input, .payments-table select { margin: 0; padding: 4px 6px; font-size: 0.85rem; min-width: 0; }
 .payments-table input[type="number"] { width: 100px; }
