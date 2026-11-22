@@ -766,6 +766,23 @@ button.pref-switch:focus-visible { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3
 }
 .card > h2:first-child { margin-top: 0; }
 .card > :last-child { margin-bottom: 0; }
+.card-title { margin: 0; }
+.card-toggle {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: none;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.card-toggle .chevron { width: 1em; color: var(--text-muted); }
+.card-body { margin-top: 12px; }
+.financial-lists { display: flex; flex-wrap: wrap; gap: 24px 48px; align-items: flex-start; }
+.financial-lists .name-list {
+  flex: 1 1 320px; min-width: 0; padding: 16px 20px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
+.financial-lists { gap: 20px; }
+.name-list h3 { margin-top: 0; }
+.name-list .type-list { max-width: none; }
+.card-body[hidden] { display: none; }
+.card-body > :last-child { margin-bottom: 0; }
 
 /* Admin: leasing document types */
 .type-list { list-style: none; padding: 0; margin: 0 0 20px; max-width: 520px; }

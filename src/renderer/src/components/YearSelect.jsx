@@ -5,6 +5,8 @@ import ManageLeaseDialog from './ManageLeaseDialog.jsx';
 import TenantsPage from './TenantsPage.jsx';
 import DocumentTypesAdmin from './DocumentTypesAdmin.jsx';
 import EmailSettings from './EmailSettings.jsx';
+import CollapsibleCard from './CollapsibleCard.jsx';
+import FinancialAdmin from './FinancialAdmin.jsx';
 import { usDate } from '../finance.js';
 import { useT, usePrefs } from '../i18n.jsx';
 import { toast } from '../toast.js';
@@ -155,8 +157,7 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
         </div>
         {tab === 'Tenants' ? <TenantsPage /> : tab === 'Admin' ? (
           <>
-          <section className="card">
-            <h2>{t('Years')}</h2>
+          <CollapsibleCard title={t('Years')}>
             <p className="hint">{t('Years already added:')}</p>
             {years.length === 0 ? (
               <p className="hint">{t('No years yet.')}</p>
@@ -188,8 +189,9 @@ export default function YearSelect({ years, properties, onSelect, onAddYear, onE
                 onClick={() => setAddingYear(true)}>{ADD_ICON}</button>
             )}
             {error && <p className="error">{error}</p>}
-          </section>
+          </CollapsibleCard>
           <DocumentTypesAdmin />
+          <FinancialAdmin />
           <EmailSettings />
           </>
           ) : yearView ? yearView : <>

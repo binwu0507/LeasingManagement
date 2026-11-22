@@ -4,7 +4,7 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 21;
+const SCHEMA_VERSION = 24;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
@@ -453,10 +453,63 @@ function init() {
         CHECK (paymentMethod IS NULL OR paymentMethod IN ('Check', 'Zelle', 'Direct Deposit', 'Apple Pay', 'Venmo', 'eBay'));
     `);
   }
+  if (version < 22) {
+    // Admin-managed lists for the Financial card: where rent is deposited, and how tenants can pay.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS receiving_banks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+      );
+      CREATE TABLE IF NOT EXISTS payment_methods (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+      );
+      INSERT OR IGNORE INTO payment_methods (name) VALUES
+        ('Check'), ('Zelle'), ('Direct Deposit'), ('Apple Pay'), ('Venmo'), ('eBay');
+    `);
+  }
+  if (version < 23) {
+    // Payments reference the admin-managed payment_methods list instead of holding the method as
+    // text. The table is rebuilt (SQLite cannot drop a CHECK-constrained column); payments saved
+    // without a method keep a NULL one. A method that payments use cannot be deleted (RESTRICT).
+    db.exec(`
+      BEGIN;
+      CREATE TABLE lease_payments_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        leaseId INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+        paymentType TEXT NOT NULL CHECK (paymentType IN ('Rent', 'Security Deposit')),
+        rentKind TEXT CHECK (rentKind IN ('Full Month', 'Prorate')),
+        amount REAL NOT NULL CHECK (amount >= 0),
+        paymentDate TEXT NOT NULL,
+        returnedDate TEXT,
+        returnedAmount REAL CHECK (returnedAmount IS NULL OR returnedAmount >= 0),
+        paymentMethodId INTEGER REFERENCES payment_methods(id) ON DELETE RESTRICT,
+        CHECK ((paymentType = 'Rent') = (rentKind IS NOT NULL)),
+        CHECK (paymentType = 'Security Deposit' OR returnedDate IS NULL)
+      );
+      INSERT INTO lease_payments_new
+        (id, leaseId, paymentType, rentKind, amount, paymentDate, returnedDate, returnedAmount, paymentMethodId)
+        SELECT p.id, p.leaseId, p.paymentType, p.rentKind, p.amount, p.paymentDate, p.returnedDate, p.returnedAmount,
+          (SELECT m.id FROM payment_methods m WHERE m.name = p.paymentMethod)
+        FROM lease_payments p;
+      DROP TABLE lease_payments;
+      ALTER TABLE lease_payments_new RENAME TO lease_payments;
+      CREATE INDEX idx_lease_payments_lease ON lease_payments (leaseId);
+      CREATE UNIQUE INDEX idx_one_deposit_per_lease
+        ON lease_payments (leaseId) WHERE paymentType = 'Security Deposit';
+      COMMIT;
+    `);
+  }
+  if (version < 24) {
+    // Which bank received the payment. Nullable only so payments saved before this step stay valid;
+    // new and edited payments must have one (see validatePayment). A bank in use cannot be deleted.
+    db.exec(`
+      ALTER TABLE lease_payments ADD COLUMN receivingBankId INTEGER REFERENCES receiving_banks(id) ON DELETE RESTRICT;
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
-const PAYMENT_METHODS = ['Check', 'Zelle', 'Direct Deposit', 'Apple Pay', 'Venmo', 'eBay'];
 const PAYMENT_TYPES = ['Rent', 'Security Deposit'];
 const RENT_KINDS = ['Full Month', 'Prorate'];
 
@@ -469,10 +522,14 @@ function validatePayment(data) {
     rentKind: text(d.rentKind) || null,
     amount: d.amount === '' || d.amount === null || d.amount === undefined ? NaN : Number(d.amount),
     paymentDate: text(d.paymentDate),
-    paymentMethod: text(d.paymentMethod)
+    paymentMethodId: Number(d.paymentMethodId),
+    receivingBankId: Number(d.receivingBankId)
   };
-  if (!PAYMENT_METHODS.includes(clean.paymentMethod)) {
+  if (!db.prepare('SELECT 1 FROM payment_methods WHERE id = ?').get(clean.paymentMethodId)) {
     throw new Error('Choose a payment method.');
+  }
+  if (!db.prepare('SELECT 1 FROM receiving_banks WHERE id = ?').get(clean.receivingBankId)) {
+    throw new Error('Choose a receiving bank.');
   }
   if (!PAYMENT_TYPES.includes(clean.paymentType)) {
     throw new Error('Payment type must be Rent or Security Deposit.');
@@ -949,9 +1006,11 @@ function listYearPayments(propertyId, yearValue) {
   const names = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
     WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`);
   return db.prepare(`
-    SELECT pay.id, pay.leaseId, pay.paymentType, pay.rentKind, pay.amount, pay.paymentDate, pay.paymentMethod,
-      pay.returnedDate, pay.returnedAmount, l.startDate, l.endDate
+    SELECT pay.id, pay.leaseId, pay.paymentType, pay.rentKind, pay.amount, pay.paymentDate, pay.paymentMethodId,
+      pm.name AS paymentMethod, pay.receivingBankId, rb.name AS receivingBank, pay.returnedDate, pay.returnedAmount, l.startDate, l.endDate
     FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
+    LEFT JOIN payment_methods pm ON pm.id = pay.paymentMethodId
+    LEFT JOIN receiving_banks rb ON rb.id = pay.receivingBankId
     WHERE l.propertyId = ? AND (substr(pay.paymentDate, 1, 4) = ? OR substr(pay.returnedDate, 1, 4) = ?)
     ORDER BY pay.paymentDate DESC, pay.id DESC
   `).all(propertyId, String(year), String(year)).map((r) => ({
@@ -988,12 +1047,22 @@ function addRentPayment(leaseId, yearValue, data) {
   }
   const clean = validatePayment({ ...(data || {}), paymentType: 'Rent' });
   assertPaymentInYear(clean, yearValue);
-  db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethod)
-    VALUES (?, 'Rent', ?, ?, ?, ?)`).run(leaseId, clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethod);
+  db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethodId, receivingBankId)
+    VALUES (?, 'Rent', ?, ?, ?, ?, ?)`)
+    .run(leaseId, clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId);
   const year = validYear(yearValue);
   syncYearRent(db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(leaseId).propertyId, year);
   return paymentChange('added', leaseId, year, null, clean);
 }
+
+const bankName = (id) => {
+  const row = id == null ? null : db.prepare('SELECT name FROM receiving_banks WHERE id = ?').get(id);
+  return row ? row.name : null;
+};
+const methodName = (id) => {
+  const row = id == null ? null : db.prepare('SELECT name FROM payment_methods WHERE id = ?').get(id);
+  return row ? row.name : null;
+};
 
 // What changed, for the notification email: the house, lease, tenants, the payment before/after
 // (null when it did not exist) and the year's rent received so far.
@@ -1003,7 +1072,8 @@ function paymentChange(action, leaseId, year, before, after) {
   const tenantNames = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
     WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`).all(leaseId).map((n) => `${n.firstName} ${n.lastName}`);
   const rec = db.prepare('SELECT yearlyRent FROM property_years WHERE propertyId = ? AND year = ?').get(lease.propertyId, year);
-  const shape = (p) => (p ? { rentKind: p.rentKind, amount: p.amount, paymentDate: p.paymentDate, paymentMethod: p.paymentMethod } : null);
+  const shape = (p) => (p ? { rentKind: p.rentKind, amount: p.amount, paymentDate: p.paymentDate,
+    paymentMethod: methodName(p.paymentMethodId), receivingBank: bankName(p.receivingBankId) } : null);
   return {
     action, year, address: lease.address, city: lease.city, state: lease.state,
     leaseStart: lease.startDate, leaseEnd: lease.endDate, tenantNames,
@@ -1012,22 +1082,22 @@ function paymentChange(action, leaseId, year, before, after) {
 }
 
 function updateRentPayment(id, yearValue, data) {
-  const before = db.prepare(`SELECT leaseId, rentKind, amount, paymentDate, paymentMethod FROM lease_payments
+  const before = db.prepare(`SELECT leaseId, rentKind, amount, paymentDate, paymentMethodId, receivingBankId FROM lease_payments
     WHERE id = ? AND paymentType = 'Rent'`).get(id);
   if (!before) {
     throw new Error('Rent payment not found.');
   }
   const clean = validatePayment({ ...(data || {}), paymentType: 'Rent' });
   assertPaymentInYear(clean, yearValue);
-  db.prepare('UPDATE lease_payments SET rentKind = ?, amount = ?, paymentDate = ?, paymentMethod = ? WHERE id = ?')
-    .run(clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethod, id);
+  db.prepare('UPDATE lease_payments SET rentKind = ?, amount = ?, paymentDate = ?, paymentMethodId = ?, receivingBankId = ? WHERE id = ?')
+    .run(clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, id);
   const year = validYear(yearValue);
   syncYearRent(db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(before.leaseId).propertyId, year);
   return paymentChange('updated', before.leaseId, year, before, clean);
 }
 
 function deleteRentPayment(id) {
-  const row = db.prepare(`SELECT pay.leaseId, l.propertyId, pay.rentKind, pay.amount, pay.paymentDate, pay.paymentMethod
+  const row = db.prepare(`SELECT pay.leaseId, l.propertyId, pay.rentKind, pay.amount, pay.paymentDate, pay.paymentMethodId, pay.receivingBankId
     FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
     WHERE pay.id = ? AND pay.paymentType = 'Rent'`).get(id);
   if (!row) {
@@ -1041,8 +1111,11 @@ function deleteRentPayment(id) {
 
 // Security deposit of a lease: { id, amount, paymentDate, returnedDate, returnedAmount } or null.
 function getDeposit(leaseId) {
-  const row = db.prepare(`SELECT id, amount, paymentDate, paymentMethod, returnedDate, returnedAmount FROM lease_payments
-    WHERE leaseId = ? AND paymentType = 'Security Deposit'`).get(leaseId);
+  const row = db.prepare(`SELECT pay.id, pay.amount, pay.paymentDate, pay.paymentMethodId, pm.name AS paymentMethod,
+      pay.receivingBankId, rb.name AS receivingBank, pay.returnedDate, pay.returnedAmount
+    FROM lease_payments pay LEFT JOIN payment_methods pm ON pm.id = pay.paymentMethodId
+    LEFT JOIN receiving_banks rb ON rb.id = pay.receivingBankId
+    WHERE pay.leaseId = ? AND pay.paymentType = 'Security Deposit'`).get(leaseId);
   return row ? toPlain(row) : null;
 }
 
@@ -1054,12 +1127,12 @@ function saveDeposit(leaseId, data) {
   const clean = validatePayment({ ...(data || {}), paymentType: 'Security Deposit' });
   const existing = getDeposit(leaseId);
   if (existing) {
-    db.prepare('UPDATE lease_payments SET amount = ?, paymentDate = ?, paymentMethod = ? WHERE id = ?')
-      .run(clean.amount, clean.paymentDate, clean.paymentMethod, existing.id);
+    db.prepare('UPDATE lease_payments SET amount = ?, paymentDate = ?, paymentMethodId = ?, receivingBankId = ? WHERE id = ?')
+      .run(clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, existing.id);
   } else {
-    db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethod)
-      VALUES (?, 'Security Deposit', NULL, ?, ?, ?)`)
-      .run(leaseId, clean.amount, clean.paymentDate, clean.paymentMethod);
+    db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethodId, receivingBankId)
+      VALUES (?, 'Security Deposit', NULL, ?, ?, ?, ?)`)
+      .run(leaseId, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId);
   }
   return getDeposit(leaseId);
 }
@@ -1219,6 +1292,62 @@ function updateDocumentType(id, name) {
 function deleteDocumentType(id) {
   db.prepare('DELETE FROM document_types WHERE id = ?').run(id);
   return listDocumentTypes();
+}
+
+// Receiving banks and payment methods (Admin > Financial): simple unique-name lists.
+const LOOKUPS = {
+  receivingBanks: { table: 'receiving_banks', label: 'receiving bank' },
+  paymentMethods: { table: 'payment_methods', label: 'payment method' }
+};
+function lookup(kind) {
+  const l = Object.hasOwn(LOOKUPS, kind) ? LOOKUPS[kind] : null;
+  if (!l) {
+    throw new Error('Unknown list.');
+  }
+  return l;
+}
+function cleanLookupName(l, name) {
+  const n = typeof name === 'string' ? name.trim() : '';
+  if (!n) {
+    throw new Error(`Enter a ${l.label} name.`);
+  }
+  if (n.length > 60) {
+    throw new Error('The name is too long (60 characters maximum).');
+  }
+  return n;
+}
+function listLookup(kind) {
+  const { table } = lookup(kind);
+  return db.prepare(`SELECT id, name FROM ${table} ORDER BY name COLLATE NOCASE`).all().map(toPlain);
+}
+function addLookup(kind, name) {
+  const l = lookup(kind);
+  try {
+    db.prepare(`INSERT INTO ${l.table} (name) VALUES (?)`).run(cleanLookupName(l, name));
+  } catch (err) {
+    throw new Error(/UNIQUE/.test(err.message) ? `That ${l.label} already exists.` : err.message);
+  }
+  return listLookup(kind);
+}
+function updateLookup(kind, id, name) {
+  const l = lookup(kind);
+  try {
+    if (db.prepare(`UPDATE ${l.table} SET name = ? WHERE id = ?`).run(cleanLookupName(l, name), id).changes === 0) {
+      throw new Error(`The ${l.label} was not found.`);
+    }
+  } catch (err) {
+    throw new Error(/UNIQUE/.test(err.message) ? `That ${l.label} already exists.` : err.message);
+  }
+  return listLookup(kind);
+}
+function deleteLookup(kind, id) {
+  const l = lookup(kind);
+  try {
+    db.prepare(`DELETE FROM ${l.table} WHERE id = ?`).run(id);
+  } catch (err) {
+    throw new Error(/FOREIGN KEY/.test(err.message) ? `This ${l.label} is used by payments and cannot be deleted.` : err.message);
+  }
+  return listLookup(kind);
 }
 
 // Houses (no yearly figures, no leases).
@@ -1512,4 +1641,4 @@ function latePayments(now = new Date()) {
   return report;
 }
 
-module.exports = { latePayments, listYearPayments, addRentPayment, updateRentPayment, deleteRentPayment, getDeposit, saveDeposit, returnDeposit, init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, deleteTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };
+module.exports = { latePayments, listYearPayments, addRentPayment, updateRentPayment, deleteRentPayment, getDeposit, saveDeposit, returnDeposit, init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listLookup, addLookup, updateLookup, deleteLookup, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, deleteTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, add, update, remove, copyFromYear };

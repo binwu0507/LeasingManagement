@@ -305,6 +305,10 @@ ipcMain.handle('documentTypes:list', () => respond(() => store.listDocumentTypes
 ipcMain.handle('documentTypes:add', (event, name) => respond(() => store.addDocumentType(name)));
 ipcMain.handle('documentTypes:update', (event, id, name) => respond(() => store.updateDocumentType(Number(id), name)));
 ipcMain.handle('documentTypes:delete', (event, id) => respond(() => store.deleteDocumentType(Number(id))));
+ipcMain.handle('lookups:list', (event, kind) => respond(() => store.listLookup(kind)));
+ipcMain.handle('lookups:add', (event, kind, name) => respond(() => store.addLookup(kind, name)));
+ipcMain.handle('lookups:update', (event, kind, id, name) => respond(() => store.updateLookup(kind, Number(id), name)));
+ipcMain.handle('lookups:delete', (event, kind, id) => respond(() => store.deleteLookup(kind, Number(id))));
 ipcMain.handle('tenants:list', () => respond(() => store.listTenants()));
 ipcMain.handle('tenants:history', (event, id) => respond(() => store.tenantLeaseHistory(id)));
 ipcMain.handle('tenants:matches', (event, data) => respond(() => store.findTenantMatches(data)));

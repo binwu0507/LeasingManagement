@@ -92,7 +92,7 @@ const us = (d) => d.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$2/$3/$1');
 
 // Subject and body describing a payment change (see paymentChange in store.js).
 function paymentMail(c) {
-  const line = (p) => `${p.rentKind} rent ${usd(p.amount)} on ${us(p.paymentDate)} (${p.paymentMethod || 'no method'})`;
+  const line = (p) => `${p.rentKind} rent ${usd(p.amount)} on ${us(p.paymentDate)} (${p.paymentMethod || 'no method'}) to ${p.receivingBank || 'no bank'}`;
   const house = `${c.address}, ${c.city}${c.state ? `, ${c.state}` : ''}`;
   const verb = { added: 'added', updated: 'updated', deleted: 'deleted' }[c.action];
   const latest = c.after || c.before;

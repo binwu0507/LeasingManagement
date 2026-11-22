@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from '../toast.js';
 import { useT } from '../i18n.jsx';
+import CollapsibleCard from './CollapsibleCard.jsx';
 
 /**
  * Admin section: the Gmail account that sends the payment notification emails, and who gets them.
@@ -61,8 +62,7 @@ export default function EmailSettings() {
   }
 
   return (
-    <section className="card email-settings">
-      <h2>{t('Email notifications')}</h2>
+    <CollapsibleCard className="email-settings" title={t('Email notifications')}>
       <p className="hint">
         {t('Rent payment changes are emailed after you confirm. Without an account, a draft opens in your mail app instead.')}
       </p>
@@ -96,6 +96,6 @@ export default function EmailSettings() {
         </form>
       )}
       {error && <p className="error">{error}</p>}
-    </section>
+    </CollapsibleCard>
   );
 }

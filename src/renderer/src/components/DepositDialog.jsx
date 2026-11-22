@@ -1,8 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useT } from '../i18n.jsx';
-
-// Keep in step with PAYMENT_METHODS in src/main/store.js.
-const PAYMENT_METHODS = ['Check', 'Zelle', 'Direct Deposit', 'Apple Pay', 'Venmo', 'eBay'];
 
 /**
  * Popup panel for the security deposit of a saved lease, rendered right below its button (the
@@ -16,10 +13,17 @@ export default function DepositDialog({ mode, deposit, onSubmit, onCancel }) {
   const isReturn = mode === 'return';
   const [date, setDate] = useState(isReturn ? today : deposit ? deposit.paymentDate : today);
   const [amount, setAmount] = useState(deposit ? deposit.amount : '');
-  const [method, setMethod] = useState(deposit && deposit.paymentMethod ? deposit.paymentMethod : '');
+  const [method, setMethod] = useState(deposit && deposit.paymentMethodId ? String(deposit.paymentMethodId) : '');
+  const [bank, setBank] = useState(deposit && deposit.receivingBankId ? String(deposit.receivingBankId) : '');
+  const [methods, setMethods] = useState([]); // the Admin-managed payment methods and receiving banks
+  const [banks, setBanks] = useState([]);
+  useEffect(() => {
+    window.api.paymentMethods.list().then((res) => res.ok && setMethods(res.data));
+    window.api.receivingBanks.list().then((res) => res.ok && setBanks(res.data));
+  }, []);
   const [error, setError] = useState('');
 
-  const submit = async () => setError((await onSubmit({ date, amount, method })) || '');
+  const submit = async () => setError((await onSubmit({ date, amount, method, bank })) || '');
   const keys = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -48,7 +52,16 @@ export default function DepositDialog({ mode, deposit, onSubmit, onCancel }) {
           {t('Payment method')}
           <select value={method} onChange={(e) => setMethod(e.target.value)}>
             <option value="">{t('Choose…')}</option>
-            {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+            {methods.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </label>
+      )}
+      {!isReturn && (
+        <label>
+          {t('Receiving bank')}
+          <select value={bank} onChange={(e) => setBank(e.target.value)}>
+            <option value="">{t('Choose…')}</option>
+            {banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </label>
       )}

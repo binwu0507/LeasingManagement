@@ -1,5 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Name lists managed on the Admin > Financial card (see LOOKUPS in store.js).
+const lookupApi = (kind) => ({
+  list: () => ipcRenderer.invoke('lookups:list', kind),
+  add: (name) => ipcRenderer.invoke('lookups:add', kind, name),
+  update: (id, name) => ipcRenderer.invoke('lookups:update', kind, id, name),
+  remove: (id) => ipcRenderer.invoke('lookups:delete', kind, id)
+});
+
 contextBridge.exposeInMainWorld('api', {
   years: {
     list: () => ipcRenderer.invoke('years:list'),
@@ -41,6 +49,8 @@ contextBridge.exposeInMainWorld('api', {
     update: (id, name) => ipcRenderer.invoke('documentTypes:update', id, name),
     remove: (id) => ipcRenderer.invoke('documentTypes:delete', id)
   },
+  receivingBanks: lookupApi('receivingBanks'),
+  paymentMethods: lookupApi('paymentMethods'),
   tenants: {
     list: () => ipcRenderer.invoke('tenants:list'),
     history: (id) => ipcRenderer.invoke('tenants:history', id),

@@ -76,11 +76,11 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
   }, [leaseId]);
 
   // Returns an error message (the panel stays open) or nothing.
-  const submitDeposit = async ({ date, amount, method }) => {
+  const submitDeposit = async ({ date, amount, method, bank }) => {
     const isReturn = depMode === 'return';
     const res = isReturn
       ? await window.api.leases.returnDeposit(leaseId, { returnedDate: date, returnedAmount: amount })
-      : await window.api.leases.saveDeposit(leaseId, { paymentDate: date, amount, paymentMethod: method });
+      : await window.api.leases.saveDeposit(leaseId, { paymentDate: date, amount, paymentMethodId: method, receivingBankId: bank });
     if (!res.ok) {
       return res.error;
     }
@@ -202,7 +202,7 @@ export default function LeaseDialog({ title, hint, lease, tenants, applyChange, 
             {deposit && (
               <p className="hint deposit-actions deposit-msg">
                 {t('Security deposit of {amount} was paid on {date}.', { amount: money.format(deposit.amount), date: deposit.paymentDate })}
-                {deposit.paymentMethod && ` (${deposit.paymentMethod})`}
+                {deposit.paymentMethod && ` (${deposit.paymentMethod}${deposit.receivingBank ? `, ${deposit.receivingBank}` : ''})`}
                 {!deposit.returnedDate && (
                   <button type="button" className="icon-btn" onClick={() => setDepMode(depMode === 'pay' ? null : 'pay')}
                     title={t('Edit deposit')} aria-label={t('Edit deposit')}>{ICONS.edit}</button>

@@ -4,8 +4,6 @@ import { money, usDate } from '../finance.js';
 import { useT } from '../i18n.jsx';
 import { toast } from '../toast.js';
 
-// Keep in step with PAYMENT_METHODS in src/main/store.js.
-const PAYMENT_METHODS = ['Check', 'Zelle', 'Direct Deposit', 'Apple Pay', 'Venmo', 'eBay'];
 const RENT_KINDS = ['Full Month', 'Prorate'];
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -52,6 +50,8 @@ export default function PaymentsDialog({ property, year, onClose }) {
   const dialogRef = useRef(null);
   const [payments, setPayments] = useState(null); // null while loading
   const [leases, setLeases] = useState([]);
+  const [methods, setMethods] = useState([]); // the Admin-managed payment methods and receiving banks
+  const [banks, setBanks] = useState([]);
   const [error, setError] = useState('');
   // The open inline form: { month, id (null when adding), leaseId, rentKind, amount, paymentDate, paymentMethod }
   const [form, setForm] = useState(null);
@@ -65,15 +65,19 @@ export default function PaymentsDialog({ property, year, onClose }) {
   });
 
   const load = useCallback(async () => {
-    const [p, l] = await Promise.all([
+    const [p, l, m, b] = await Promise.all([
       window.api.leases.listPayments(property.propertyId, year),
-      window.api.leases.list(property.propertyId)
+      window.api.leases.list(property.propertyId),
+      window.api.paymentMethods.list(),
+      window.api.receivingBanks.list()
     ]);
-    if (p.ok && l.ok) {
+    if (p.ok && l.ok && m.ok && b.ok) {
+      setMethods(m.data);
+      setBanks(b.data);
       setPayments(p.data);
       setLeases(l.data); // oldest first
     } else {
-      setError(p.ok ? l.error : p.error);
+      setError(!p.ok ? p.error : !l.ok ? l.error : !m.ok ? m.error : b.error);
     }
   }, [property.propertyId, year]);
 
@@ -107,13 +111,14 @@ export default function PaymentsDialog({ property, year, onClose }) {
     }
     setForm({
       month, id: null, leaseId: lease.id, rentKind: partial || alreadyPaid ? 'Prorate' : 'Full Month', amount,
-      paymentDate: partial && lease.startDate > first ? from : first, paymentMethod: 'Zelle'
+      paymentDate: partial && lease.startDate > first ? from : first, paymentMethodId: String((methods.find((m) => m.name === 'Zelle') || {}).id || ''), receivingBankId: ''
     });
   };
 
   const startEdit = (month, p) => setForm({
     month, id: p.id, leaseId: p.leaseId, rentKind: p.rentKind, amount: p.amount,
-    paymentDate: p.paymentDate, paymentMethod: p.paymentMethod || ''
+    paymentDate: p.paymentDate, paymentMethodId: p.paymentMethodId ? String(p.paymentMethodId) : '',
+    receivingBankId: p.receivingBankId ? String(p.receivingBankId) : ''
   });
 
   // Tells the user what happened to the notification email (the payment itself is already saved).
@@ -132,7 +137,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
       return;
     }
     setError('');
-    const data = { rentKind: form.rentKind, amount: form.amount, paymentDate: form.paymentDate, paymentMethod: form.paymentMethod };
+    const data = { rentKind: form.rentKind, amount: form.amount, paymentDate: form.paymentDate, paymentMethodId: form.paymentMethodId, receivingBankId: form.receivingBankId };
     const res = form.id
       ? await window.api.leases.updatePayment(form.id, year, data)
       : await window.api.leases.addPayment(form.leaseId, year, data);
@@ -205,9 +210,15 @@ export default function PaymentsDialog({ property, year, onClose }) {
           aria-label={t('Amount ($)')} autoFocus />
       </td>
       <td>
-        <select value={form.paymentMethod} onChange={set('paymentMethod')} aria-label={t('Payment method')}>
+        <select value={form.paymentMethodId} onChange={set('paymentMethodId')} aria-label={t('Payment method')}>
           <option value="">{t('Choose…')}</option>
-          {PAYMENT_METHODS.map((x) => <option key={x} value={x}>{x}</option>)}
+          {methods.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+      </td>
+      <td>
+        <select value={form.receivingBankId} onChange={set('receivingBankId')} aria-label={t('Receiving bank')}>
+          <option value="">{t('Choose…')}</option>
+          {banks.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
         </select>
       </td>
       <td className="row-actions">
@@ -224,6 +235,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
       <td>{p.paymentType === 'Rent' ? `${t('Rent')} (${t(p.rentKind)})` : t(p.isReturn ? 'Deposit returned' : 'Security deposit')}</td>
       <td className="num">{p.isReturn ? `−${money.format(p.amount)}` : money.format(p.amount)}</td>
       <td>{p.paymentMethod || ''}</td>
+      <td>{p.receivingBank || ''}</td>
       <td className="row-actions">
         {p.paymentType === 'Rent' ? (
           <>
@@ -263,7 +275,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
       rows.push(<tr key="draft" className="editing">{list.length === 0 && monthCell}{editCells(m)}</tr>);
     }
     if (rows.length === 0) {
-      rows.push(<tr key="empty">{monthCell}<td colSpan={5} className="hint">—</td></tr>);
+      rows.push(<tr key="empty">{monthCell}<td colSpan={6} className="hint">—</td></tr>);
     }
     return rows;
   };
@@ -286,6 +298,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
                 <th>{t('Type')}</th>
                 <th className="num">{t('Amount ($)')}</th>
                 <th>{t('Payment method')}</th>
+                <th>{t('Receiving bank')}</th>
                 <th />
               </tr>
             </thead>
@@ -295,7 +308,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
               return (
                 <tbody key={key}>
                   <tr className="lease-row">
-                    <th colSpan={6}>
+                    <th colSpan={7}>
                       <button type="button" className="group-toggle" aria-expanded={open} onClick={() => toggleGroup(key)}>
                         <span className="chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
                         {g.lease
@@ -312,7 +325,7 @@ export default function PaymentsDialog({ property, year, onClose }) {
               <tr>
                 <td colSpan={3}>{t('Total received')}</td>
                 <td className="num">{money.format(total)}</td>
-                <td colSpan={2} />
+                <td colSpan={3} />
               </tr>
             </tfoot>
           </table>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from '../toast.js';
 import { useT } from '../i18n.jsx';
+import CollapsibleCard from './CollapsibleCard.jsx';
 
 const icon = (...paths) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -75,8 +76,7 @@ export default function DocumentTypesAdmin() {
   }
 
   return (
-    <section className="card doc-types">
-      <h2>{t('Leasing Document Types')}</h2>
+    <CollapsibleCard className="doc-types" title={t('Leasing Document Types')}>
       {types && types.length === 0 && <p className="hint">{t('No document types yet.')}</p>}
       {types && types.length > 0 && (
         <ul className="type-list">
@@ -121,6 +121,6 @@ export default function DocumentTypesAdmin() {
           onClick={() => setAdding(true)}>{ADD_ICON}</button>
       )}
       {error && <p className="error">{error}</p>}
-    </section>
+    </CollapsibleCard>
   );
 }
