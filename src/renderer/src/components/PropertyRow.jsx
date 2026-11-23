@@ -3,7 +3,7 @@ import { ICONS } from '../icons.jsx';
 import { MONEY_COLUMNS, money, optMoney, netIncome, netFormula } from '../finance.js';
 import { useT } from '../i18n.jsx';
 
-export default function PropertyRow({ property: p, onEdit, onDelete, onPayments, onRepairs }) {
+export default function PropertyRow({ property: p, onEdit, onDelete, onPayments, onRepairs, onReport }) {
   const t = useT();
   const net = netIncome(p);
   return (
@@ -23,6 +23,8 @@ export default function PropertyRow({ property: p, onEdit, onDelete, onPayments,
           title={t('Payments')} aria-label={t('Payments')}>{ICONS.payments}</button>
         <button type="button" className="icon-btn" onClick={() => onRepairs(p)}
           title={t('Repair cost')} aria-label={t('Repair cost')}>{ICONS.cost}</button>
+        <button type="button" className="icon-btn" onClick={() => onReport(p)}
+          title={t('Open PDF report')} aria-label={t('Open PDF report')}>{ICONS.report}</button>
         <button type="button" className="icon-btn danger" onClick={() => onDelete(p)}
           title={t('Delete')} aria-label={t('Delete')}>{ICONS.trash}</button>
       </td>

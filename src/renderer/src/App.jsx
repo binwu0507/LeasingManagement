@@ -9,6 +9,7 @@ import PaymentsDialog from './components/PaymentsDialog.jsx';
 import RepairCostDialog from './components/RepairCostDialog.jsx';
 import Toaster from './components/Toaster.jsx';
 import { toast } from './toast.js';
+import { ICONS } from './icons.jsx';
 import { useT } from './i18n.jsx';
 
 export default function App() {
@@ -101,6 +102,20 @@ export default function App() {
     toast(t('Saved.'));
   }
 
+  async function exportYear() {
+    const res = await window.api.properties.exportYear(year);
+    if (!res.ok) {
+      toast(res.error);
+    }
+  }
+
+  async function openReport(p) {
+    const res = await window.api.properties.openReport(p.id);
+    if (!res.ok) {
+      toast(res.error);
+    }
+  }
+
   async function addToYear(propertyIds) {
     const res = await window.api.properties.addToYear(year, propertyIds);
     if (!res.ok) {
@@ -167,6 +182,8 @@ export default function App() {
               {years.filter((y) => y !== year).map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </label>
+          <button type="button" className="icon-btn" onClick={exportYear} disabled={properties.length === 0}
+            title={t('Export year to Excel')} aria-label={t('Export year to Excel')}>{ICONS.excel}</button>
         </div>
         <div className="header-actions" style={{ margin: 0 }}>
           <button
@@ -179,7 +196,7 @@ export default function App() {
           <button className="primary" onClick={() => { loadAll(); setAdding(true); }}>{t('+ Add Property…')}</button>
         </div>
       </div>
-      <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} onPayments={setPaymentsFor} onRepairs={setRepairsFor} />
+      <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} onPayments={setPaymentsFor} onRepairs={setRepairsFor} onReport={openReport} />
       <YearlySummary properties={properties} />
     </>
   );

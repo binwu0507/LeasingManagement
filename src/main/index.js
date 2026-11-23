@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const store = require('./store');
+const { buildZip } = require('./zip');
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -213,72 +214,6 @@ ipcMain.handle('leases:downloadDocument', async (event, docId) => {
     return { ok: false, error: err.message };
   }
 });
-// Minimal ZIP writer (deflate, no zip64): files = [{ fileName, data }].
-const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
-  let c = n;
-  for (let k = 0; k < 8; k++) {
-    c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  }
-  return c >>> 0;
-});
-function crc32(buf) {
-  let c = 0xffffffff;
-  for (const b of buf) {
-    c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
-  }
-  return (c ^ 0xffffffff) >>> 0;
-}
-function buildZip(files) {
-  const zlib = require('zlib');
-  const used = new Set();
-  const parts = [];
-  const central = [];
-  let offset = 0;
-  for (const f of files) {
-    // unique entry name: "a.pdf", "a (2).pdf", ...
-    const ext = path.extname(f.fileName);
-    const base = path.basename(f.fileName, ext);
-    let name = base + ext;
-    for (let i = 2; used.has(name.toLowerCase()); i++) {
-      name = `${base} (${i})${ext}`;
-    }
-    used.add(name.toLowerCase());
-    const nameBuf = Buffer.from(name, 'utf8');
-    const packed = zlib.deflateRawSync(f.data);
-    const crc = crc32(f.data);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0x0800, 6); // UTF-8 names
-    local.writeUInt16LE(8, 8);
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(packed.length, 18);
-    local.writeUInt32LE(f.data.length, 22);
-    local.writeUInt16LE(nameBuf.length, 26);
-    const head = Buffer.alloc(46);
-    head.writeUInt32LE(0x02014b50, 0);
-    head.writeUInt16LE(20, 4);
-    head.writeUInt16LE(20, 6);
-    head.writeUInt16LE(0x0800, 8);
-    head.writeUInt16LE(8, 10);
-    head.writeUInt32LE(crc, 16);
-    head.writeUInt32LE(packed.length, 20);
-    head.writeUInt32LE(f.data.length, 24);
-    head.writeUInt16LE(nameBuf.length, 28);
-    head.writeUInt32LE(offset, 42);
-    central.push(head, nameBuf);
-    parts.push(local, nameBuf, packed);
-    offset += 30 + nameBuf.length + packed.length;
-  }
-  const centralBuf = Buffer.concat(central);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(files.length, 8);
-  end.writeUInt16LE(files.length, 10);
-  end.writeUInt32LE(centralBuf.length, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...parts, centralBuf, end]);
-}
 ipcMain.handle('leases:downloadAllDocuments', async (event, leaseId) => {
   try {
     const lease = store.getLeaseFiles(Number(leaseId));
@@ -319,7 +254,39 @@ ipcMain.handle('properties:listAll', () => respond(() => store.listProperties())
 ipcMain.handle('houses:add', (event, data) => respond(() => store.addProperty(data)));
 ipcMain.handle('houses:update', (event, id, data) => respond(() => store.updateProperty(id, data)));
 ipcMain.handle('properties:list', (event, year) => respond(() => store.list(year)));
-ipcMain.handle('properties:add', (event, year, data) => respond(() => store.add(year, data)));
+// PDF report for one property-year: rendered here and opened from a temporary copy in the default PDF viewer.
+ipcMain.handle('properties:openReport', async (event, id) => {
+  try {
+    const { fileName, pdf } = await require('./report').renderPdf(Number(id));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'report-'));
+    const file = path.join(dir, fileName);
+    fs.writeFileSync(file, pdf);
+    const failure = await shell.openPath(file);
+    if (failure) {
+      throw new Error(failure);
+    }
+    return { ok: true, data: null };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+// Excel report of every property of a year: opened from a temporary copy in the default spreadsheet app.
+ipcMain.handle('properties:exportYear', async (_event, year) => {
+  try {
+    const { fileName, data } = require('./excel').yearWorkbook(year);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'report-'));
+    const file = path.join(dir, fileName);
+    fs.writeFileSync(file, data);
+    const failure = await shell.openPath(file);
+    if (failure) {
+      throw new Error(failure);
+    }
+    return { ok: true, data: null };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('properties:add',(event, year, data) => respond(() => store.add(year, data)));
 ipcMain.handle('properties:update', (event, id, data) => respond(() => store.update(id, data)));
 ipcMain.handle('properties:copy', (event, target, source, ids) =>
   respond(() => store.copyFromYear(target, source, ids)));
