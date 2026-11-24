@@ -5,7 +5,7 @@ import { useT } from '../i18n.jsx';
 
 const SORT_VALUE = { net: netIncome };
 
-export default function PropertyTable({ properties, onEdit, onDelete, onPayments, onRepairs, onReport }) {
+export default function PropertyTable({ properties, onEdit, onDelete, onPayments, onRepairs, onHoa, onReport }) {
   const t = useT();
   const [sort, setSort] = useState({ key: null, dir: 1 });
 
@@ -39,7 +39,7 @@ export default function PropertyTable({ properties, onEdit, onDelete, onPayments
     : properties;
 
   return (
-    <table>
+    <table className="property-table">
       <thead>
         <tr>
           <th>{t('Address')}</th>
@@ -52,7 +52,7 @@ export default function PropertyTable({ properties, onEdit, onDelete, onPayments
       </thead>
       <tbody>
         {shown.map((p) => (
-          <PropertyRow key={p.id} property={p} onEdit={onEdit} onDelete={onDelete} onPayments={onPayments} onRepairs={onRepairs} onReport={onReport} />
+          <PropertyRow key={p.id} property={p} onEdit={onEdit} onDelete={onDelete} onPayments={onPayments} onRepairs={onRepairs} onHoa={onHoa} onReport={onReport} />
         ))}
       </tbody>
       <tfoot>
@@ -60,7 +60,7 @@ export default function PropertyTable({ properties, onEdit, onDelete, onPayments
           <td>{t('Annual totals')}</td>
           {MONEY_COLUMNS.map((col, i) => (
             <Fragment key={col.field}>
-              <td className="num">{money.format(totals[col.field])}</td>
+              <td className={`num ${col.field === 'yearlyRent' ? 'income' : 'cost'}`}>{money.format(totals[col.field])}</td>
               {i === 0 && <td className="num">{totals.vacantDays}</td>}
             </Fragment>
           ))}

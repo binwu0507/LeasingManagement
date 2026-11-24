@@ -23,6 +23,8 @@ function oldDatabase() {
 
   const raw = new DatabaseSync(file);
   raw.exec(`
+    ALTER TABLE property_years DROP COLUMN hoaFrequency; -- added by the v26 step
+    ALTER TABLE property_years DROP COLUMN hoaAmounts;
     DROP TABLE lease_payments;
     DROP TABLE receiving_banks;
     DROP TABLE payment_methods;
@@ -51,7 +53,7 @@ function oldDatabase() {
   return { file, property: p };
 }
 
-describe('migration v21 -> v25', () => {
+describe('migration v21 -> v26', () => {
   it('keeps every payment and turns the method text into a reference', () => {
     const { property } = oldDatabase();
     const rows = store.listYearPayments(property.id, 2025);
@@ -86,7 +88,7 @@ describe('migration v21 -> v25', () => {
     const { file } = oldDatabase();
     store.close();
     const raw = new DatabaseSync(file);
-    expect(raw.prepare('PRAGMA user_version').get().user_version).toBe(25);
+    expect(raw.prepare('PRAGMA user_version').get().user_version).toBe(26);
     raw.close();
   });
 });

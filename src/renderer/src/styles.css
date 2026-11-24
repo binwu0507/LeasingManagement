@@ -260,6 +260,7 @@ th {
   letter-spacing: 0.05em;
   white-space: nowrap;
 }
+.property-table thead th + th { border-left: 1px solid var(--border); } /* header dividers */
 td:first-child { white-space: nowrap; }
 tbody tr { transition: background var(--transition); }
 tbody tr:hover { background: var(--surface-alt); }
@@ -271,6 +272,8 @@ tbody tr:last-child td { border-bottom: none; }
 .row-actions button + button { margin-left: 6px; }
 
 td.net-cell { font-weight: 600; }
+td.income { color: var(--success); }
+td.cost { color: var(--danger); }
 td.gain { color: var(--success); }
 td.loss { color: var(--danger); }
 
@@ -831,6 +834,25 @@ td .icon-btn.danger:hover:not(:disabled), .tenant-line .icon-btn.danger:hover:no
 .icon-btn svg { width: 20px; height: 20px; flex: none; }
 .row-actions .icon-btn { width: 34px; height: 34px; padding: 0; font-size: inherit; }
 .row-actions .icon-btn + .icon-btn { margin-left: 2px; }
+
+/* Amount cell: icon right beside the amount. The amount sits in a fixed-width right-aligned slot,
+   so the icons line up from row to row whatever the amount's length. */
+.amount-cell { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.amount-cell .amount { min-width: 10ch; text-align: right; }
+
+/* Icons placed beside an amount in a table cell */
+.icon-btn.inline { vertical-align: middle; margin-right: 4px; }
+.icon-btn.inline.small { width: 24px; height: 24px; }
+.icon-btn.inline.small svg { width: 14px; height: 14px; }
+
+/* HOA dialog */
+.hoa-grid { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }
+.hoa-grid.monthly { grid-template-columns: repeat(3, 1fr); }
+.hoa-grid label { margin: 0; }
+.hoa-name { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }
+.hoa-cell { display: flex; flex-direction: column; gap: 4px; }
+.hoa-title { display: flex; align-items: center; gap: 4px; min-height: 24px; } /* fixed height: the icon appearing must not shift the grid */
+.hoa-title .icon-btn.inline { margin: 0; }
 
 /* Property status icons */
 .status { display: inline-flex; }

@@ -7,6 +7,7 @@ import AddToYear from './components/AddToYear.jsx';
 import YearSelect from './components/YearSelect.jsx';
 import PaymentsDialog from './components/PaymentsDialog.jsx';
 import RepairCostDialog from './components/RepairCostDialog.jsx';
+import HoaDialog from './components/HoaDialog.jsx';
 import Toaster from './components/Toaster.jsx';
 import { toast } from './toast.js';
 import { ICONS } from './icons.jsx';
@@ -23,6 +24,7 @@ export default function App() {
   const [adding, setAdding] = useState(false); // "Add Property…" picker open
   const [paymentsFor, setPaymentsFor] = useState(null); // year record whose payments are open
   const [repairsFor, setRepairsFor] = useState(null); // year record whose repair costs are open
+  const [hoaFor, setHoaFor] = useState(null); // year record whose HOA panel is open
   const [copying, setCopying] = useState(false);
   const [tab, setTab] = useState('Properties'); // home page tab: Properties | Tenants
   // Home page dialog: undefined = closed, null = adding, object = editing that house
@@ -98,6 +100,21 @@ export default function App() {
       return res.error;
     }
     setRepairsFor(null);
+    refresh();
+    toast(t('Saved.'));
+  }
+
+  // Saves how the HOA is paid and each period's amount; the other yearly figures are sent back unchanged.
+  async function saveHoa(hoaFrequency, hoaAmounts) {
+    const p = hoaFor;
+    const figures = Object.fromEntries(
+      ['yearlyRent', 'propertyTax', 'yearlyHoa', 'mortgage', 'insurance', 'mortgageInterest'].map((f) => [f, p[f] ?? ''])
+    );
+    const res = await window.api.properties.update(p.id, { ...figures, hoaFrequency, hoaAmounts });
+    if (!res.ok) {
+      return res.error;
+    }
+    setHoaFor(null);
     refresh();
     toast(t('Saved.'));
   }
@@ -196,7 +213,7 @@ export default function App() {
           <button className="primary" onClick={() => { loadAll(); setAdding(true); }}>{t('+ Add Property…')}</button>
         </div>
       </div>
-      <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} onPayments={setPaymentsFor} onRepairs={setRepairsFor} onReport={openReport} />
+      <PropertyTable properties={properties} onEdit={setEditing} onDelete={remove} onPayments={setPaymentsFor} onRepairs={setRepairsFor} onHoa={setHoaFor} onReport={openReport} />
       <YearlySummary properties={properties} />
     </>
   );
@@ -256,6 +273,15 @@ export default function App() {
           property={repairsFor}
           onSave={saveRepairs}
           onCancel={() => setRepairsFor(null)}
+        />
+      )}
+
+      {year !== null && hoaFor && (
+        <HoaDialog
+          key={hoaFor.id}
+          property={hoaFor}
+          onSave={saveHoa}
+          onCancel={() => setHoaFor(null)}
         />
       )}
 

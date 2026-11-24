@@ -4,7 +4,7 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 25;
+const SCHEMA_VERSION = 26;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
@@ -15,7 +15,7 @@ const YEAR_FIELDS = ['yearlyRent', 'propertyTax', 'yearlyHoa', 'mortgage', 'insu
 // Joined view of one yearly record: `id` is the property_years id, `propertyId` the house.
 const SELECT_RECORD = `
   SELECT y.id, y.propertyId, y.year, ${PROPERTY_FIELDS.map((f) => 'p.' + f).join(', ')},
-         ${YEAR_FIELDS.map((f) => 'y.' + f).join(', ')},
+         ${YEAR_FIELDS.map((f) => 'y.' + f).join(', ')}, y.hoaFrequency, y.hoaAmounts,
          (SELECT SUM(r.amount) FROM repair_items r WHERE r.propertyYearId = y.id) AS repairCost
   FROM property_years y JOIN properties p ON p.id = y.propertyId`;
 
@@ -517,7 +517,38 @@ function init(dbPath) {
       UPDATE lease_payments SET forMonth = substr(paymentDate, 1, 7) WHERE paymentType = 'Rent';
     `);
   }
+  if (version < 26) {
+    // How a year's HOA is paid (Yearly, Half-Yearly or Monthly) and the amount of each period, as a
+    // JSON array. yearlyHoa stays the stored total, so reports and net income are unchanged.
+    db.exec(`
+      ALTER TABLE property_years ADD COLUMN hoaFrequency TEXT;
+      ALTER TABLE property_years ADD COLUMN hoaAmounts TEXT;
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+const HOA_PERIODS = { Yearly: 1, 'Half-Yearly': 2, Monthly: 12 };
+
+// Normalize and check the HOA breakdown; returns null when the caller did not send one.
+function cleanHoa(data) {
+  if (data.hoaFrequency === undefined) {
+    return null;
+  }
+  const count = HOA_PERIODS[data.hoaFrequency];
+  if (!count) {
+    throw new Error('HOA frequency must be Yearly, Half-Yearly or Monthly.');
+  }
+  const list = Array.isArray(data.hoaAmounts) ? data.hoaAmounts : [];
+  const amounts = Array.from({ length: count }, (_, i) => {
+    const raw = list[i];
+    const n = raw === '' || raw === null || raw === undefined ? 0 : Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error('HOA amounts must be zero or more.');
+    }
+    return Math.round(n * 100) / 100;
+  });
+  return { frequency: data.hoaFrequency, amounts, total: Math.round(amounts.reduce((s, a) => s + a, 0) * 100) / 100 };
 }
 
 const PAYMENT_TYPES = ['Rent', 'Security Deposit'];
@@ -1473,7 +1504,10 @@ function withItems(row) {
     SELECT id, date, amount, contractor, description FROM repair_items
     WHERE propertyYearId = ? ORDER BY date, id
   `).all(row.id).map(toPlain);
-  return { ...row, repairItems, vacantDays: vacantDays(row.propertyId, row.year, row.purchaseDate) };
+  // The HOA breakdown: how it is paid and the amount of each period (a single yearly amount if never set).
+  const hoaFrequency = row.hoaFrequency || 'Yearly';
+  const hoaAmounts = row.hoaAmounts ? JSON.parse(row.hoaAmounts) : [row.yearlyHoa];
+  return { ...row, hoaFrequency, hoaAmounts, repairItems, vacantDays: vacantDays(row.propertyId, row.year, row.purchaseDate) };
 }
 
 // Replace a record's repair items with the given (already validated) list.
@@ -1544,9 +1578,14 @@ function add(yearValue, data) {
 function update(id, data) {
   // Placeholders stand in for the house fields so the shared validator checks the yearly ones.
   const house = { address: 'x', city: 'x', bedrooms: 0, bathrooms: 0, sqft: 0 };
-  const valid = validate({ ...house, ...pick(data || {}, [...YEAR_FIELDS, 'repairItems']) });
+  const hoa = cleanHoa(data || {});
+  const input = pick(data || {}, [...YEAR_FIELDS, 'repairItems']);
+  if (hoa) {
+    input.yearlyHoa = hoa.total; // the yearly figure is always the sum of the periods
+  }
+  const valid = validate({ ...house, ...input });
   const clean = pick(valid, YEAR_FIELDS);
-  const record = db.prepare('SELECT year FROM property_years WHERE id = ?').get(id);
+  const record = db.prepare('SELECT year, yearlyHoa FROM property_years WHERE id = ?').get(id);
   if (!record) {
     throw new Error('Property not found.');
   }
@@ -1557,6 +1596,13 @@ function update(id, data) {
   db.exec('BEGIN');
   try {
     db.prepare(`UPDATE property_years SET ${sets} WHERE id = @id`).run({ ...pick(clean, editable), id });
+    if (hoa) {
+      db.prepare('UPDATE property_years SET hoaFrequency = ?, hoaAmounts = ? WHERE id = ?')
+        .run(hoa.frequency, JSON.stringify(hoa.amounts), id);
+    } else if (clean.yearlyHoa !== record.yearlyHoa) {
+      // The yearly HOA was edited directly (house form): the old breakdown no longer applies.
+      db.prepare('UPDATE property_years SET hoaFrequency = NULL, hoaAmounts = NULL WHERE id = ?').run(id);
+    }
     if (Array.isArray((data || {}).repairItems)) { // omitted = leave the repair items alone
       setRepairItems(id, valid.repairItems);
     }
