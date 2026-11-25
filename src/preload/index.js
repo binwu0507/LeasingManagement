@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('api', {
     addPayment: (leaseId, year, data) => ipcRenderer.invoke('leases:addPayment', leaseId, year, data),
     updatePayment: (id, year, data) => ipcRenderer.invoke('leases:updatePayment', id, year, data),
     deletePayment: (id) => ipcRenderer.invoke('leases:deletePayment', id),
+    addSpecial: (leaseId, data) => ipcRenderer.invoke('leases:addSpecial', leaseId, data),
+    updateSpecial: (id, data) => ipcRenderer.invoke('leases:updateSpecial', id, data),
+    deleteSpecial: (id) => ipcRenderer.invoke('leases:deleteSpecial', id),
     getDeposit: (leaseId) => ipcRenderer.invoke('leases:getDeposit', leaseId),
     saveDeposit: (leaseId, data) => ipcRenderer.invoke('leases:saveDeposit', leaseId, data),
     returnDeposit: (leaseId, data) => ipcRenderer.invoke('leases:returnDeposit', leaseId, data),
@@ -51,6 +54,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   receivingBanks: lookupApi('receivingBanks'),
   paymentMethods: lookupApi('paymentMethods'),
+  specialCategories: lookupApi('specialCategories'),
   tenants: {
     list: () => ipcRenderer.invoke('tenants:list'),
     history: (id) => ipcRenderer.invoke('tenants:history', id),

@@ -151,6 +151,9 @@ ipcMain.handle('leases:listPayments', (event, propertyId, year) => respond(() =>
 ipcMain.handle('leases:addPayment', (event, leaseId, year, data) => respondAndMail(event, () => store.addRentPayment(Number(leaseId), year, data)));
 ipcMain.handle('leases:updatePayment', (event, id, year, data) => respondAndMail(event, () => store.updateRentPayment(Number(id), year, data)));
 ipcMain.handle('leases:deletePayment', (event, id) => respondAndMail(event, () => store.deleteRentPayment(Number(id))));
+ipcMain.handle('leases:addSpecial', (event, leaseId, data) => respond(() => store.addSpecialPayment(Number(leaseId), data)));
+ipcMain.handle('leases:updateSpecial', (event, id, data) => respond(() => store.updateSpecialPayment(Number(id), data)));
+ipcMain.handle('leases:deleteSpecial', (event, id) => respond(() => store.deleteSpecialPayment(Number(id))));
 ipcMain.handle('leases:getDeposit', (event, leaseId) => respond(() => store.getDeposit(Number(leaseId))));
 ipcMain.handle('leases:saveDeposit', (event, leaseId, data) => respond(() => store.saveDeposit(Number(leaseId), data)));
 ipcMain.handle('leases:returnDeposit', (event, leaseId, data) => respond(() => store.returnDeposit(Number(leaseId), data)));

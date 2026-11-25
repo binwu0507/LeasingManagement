@@ -14,6 +14,12 @@ const METHOD_TEXT = {
   added: 'Payment method added.', saved: 'Payment method saved.', deleted: 'Payment method deleted.',
   exists: 'That payment method already exists.', confirm: 'Delete the payment method "{name}"?'
 };
+const SPECIAL_TEXT = {
+  heading: 'Special Income Categories', empty: 'No categories yet.', name: 'Category name',
+  add: 'Add category', edit: 'Edit category', del: 'Delete category',
+  added: 'Category added.', saved: 'Category saved.', deleted: 'Category deleted.',
+  exists: 'That category already exists.', confirm: 'Delete the category "{name}"?'
+};
 
 /** Admin > Financial: the receiving banks and the payment methods. */
 export default function FinancialAdmin() {
@@ -23,6 +29,7 @@ export default function FinancialAdmin() {
       <div className="financial-lists">
         <NameListAdmin api={window.api.receivingBanks} text={BANK_TEXT} />
         <NameListAdmin api={window.api.paymentMethods} text={METHOD_TEXT} />
+        <NameListAdmin api={window.api.specialCategories} text={SPECIAL_TEXT} />
       </div>
     </CollapsibleCard>
   );

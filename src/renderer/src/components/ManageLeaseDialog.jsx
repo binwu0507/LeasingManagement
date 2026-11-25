@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { money as formatMoney, usDate } from '../finance.js';
 import LeaseDialog from './LeaseDialog.jsx';
+import PaymentsDialog from './PaymentsDialog.jsx';
 import { toast } from '../toast.js';
 import { useT } from '../i18n.jsx';
 
@@ -96,6 +97,9 @@ export default function ManageLeaseDialog({ property, onClose }) {
   const [error, setError] = useState('');
   // { mode: 'add' | 'renew' | 'edit', lease } while the lease dialog is open
   const [leaseDialog, setLeaseDialog] = useState(null);
+  // { lease } while the "was a charge paid?" prompt is open; { year, addChargeFor } while the payments dialog is.
+  const [chargePrompt, setChargePrompt] = useState(null);
+  const [payments, setPayments] = useState(null);
   const propertyId = property.id;
 
   const reloadLeases = async () => {
@@ -125,8 +129,13 @@ export default function ManageLeaseDialog({ property, onClose }) {
     if (!res.ok) {
       return res.error;
     }
+    // Ending a lease early (flag just turned on): ask whether a termination charge was paid.
+    const wasEarly = leaseId !== undefined && leases.some((l) => l.id === leaseId && l.earlyTermination);
     await reloadLeases();
     toast(leaseId === undefined ? tr('Lease added.') : tr('Lease saved.'));
+    if (res.data.earlyTermination && !wasEarly && res.data.terminationChargeCount === 0) {
+      setChargePrompt({ lease: res.data });
+    }
     return undefined;
   };
   // Names of the tenants occupying a lease, comma-separated.
@@ -150,7 +159,7 @@ export default function ManageLeaseDialog({ property, onClose }) {
   // Adds a follow-on lease: starts the day after this one ends, runs one year, same rent and
   // same occupying tenants. Everything is editable before saving.
   const renewalFor = (l) => {
-    const startDate = addDays(l.endDate, 1);
+    const startDate = addDays(l.earlyTermination ? l.moveOutDate : l.endDate, 1);
     const endDate = defaultEnd(startDate);
     return {
       startDate, endDate, monthlyRent: l.monthlyRent, moveInDate: startDate, moveOutDate: endDate,
@@ -159,6 +168,16 @@ export default function ManageLeaseDialog({ property, onClose }) {
   };
   // Confirming the lease dialog saves the lease; an error stays in the dialog.
   const confirmLease = async (lease) => {
+    // Removing the early move-out of a lease that has a termination charge: the charge must go too.
+    const before = leaseDialog.mode === 'edit' ? leases.find((l) => l.id === leaseDialog.lease.id) : null;
+    const stillEarly = lease.moveOutDate && lease.endDate && lease.moveOutDate < lease.endDate;
+    if (before && before.earlyTermination && before.terminationChargeCount > 0 && !stillEarly) {
+      if (!confirm(tr('This lease no longer ends early, so its early termination charge ({amount}) will be deleted. Delete it and save?',
+        { amount: formatMoney.format(before.terminationCharge) }))) {
+        return tr('Not saved: the early termination charge must be deleted to remove the early move-out.');
+      }
+      lease = { ...lease, deleteTerminationCharge: true };
+    }
     const err = await persistLease(lease, leaseDialog.mode === 'edit' ? leaseDialog.lease.id : undefined);
     if (!err) {
       setLeaseDialog(null);
@@ -219,7 +238,18 @@ export default function ManageLeaseDialog({ property, onClose }) {
                       <td>{usDate(l.endDate)}</td>
                       <td>{formatMoney.format(l.monthlyRent)}</td>
                       <td>{usDate(l.moveInDate) || '—'}</td>
-                      <td>{usDate(l.moveOutDate) || '—'}</td>
+                      <td>
+                        {usDate(l.moveOutDate) || '—'}
+                        {l.earlyTermination === 1 && (
+                          <button type="button" className="link-btn termination-badge"
+                            onClick={() => setPayments({ year: Number(l.moveOutDate.slice(0, 4)), addChargeFor: null })}
+                            title={tr('Open the payments of the year the lease ended')}>
+                            {l.terminationChargeCount > 0
+                              ? tr('Early termination, charge {amount}', { amount: formatMoney.format(l.terminationCharge) })
+                              : tr('Early termination, no charge')}
+                          </button>
+                        )}
+                      </td>
                       <td>{occupyingNames(l) || '—'}</td>
                       <td className="actions-col">
                         <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
@@ -251,6 +281,29 @@ export default function ManageLeaseDialog({ property, onClose }) {
           <button type="button" onClick={onClose}>{tr('Close')}</button>
         </div>
       </form>
+      {chargePrompt && (
+        <dialog ref={(el) => el && !el.open && el.showModal()} onCancel={() => setChargePrompt(null)}>
+          <form method="dialog" onSubmit={(e) => e.preventDefault()}>
+            <h2>{tr('Early termination')}</h2>
+            <p>{tr('Lease ends early on {date}. Was an early termination charge paid?', { date: usDate(chargePrompt.lease.moveOutDate) })}</p>
+            <div className="actions">
+              <button type="button" onClick={() => setChargePrompt(null)}>{tr('No charge / later')}</button>
+              <button type="button" className="primary" onClick={() => {
+                setPayments({ year: Number(chargePrompt.lease.moveOutDate.slice(0, 4)), addChargeFor: chargePrompt.lease.id });
+                setChargePrompt(null);
+              }}>{tr('Record charge')}</button>
+            </div>
+          </form>
+        </dialog>
+      )}
+      {payments && (
+        <PaymentsDialog
+          property={{ propertyId, address: property.address, city: property.city }}
+          year={payments.year}
+          addChargeFor={payments.addChargeFor}
+          onClose={() => { setPayments(null); reloadLeases(); }}
+        />
+      )}
       {leaseDialog && (
         <LeaseDialog
           title={tr({ add: 'Add Lease', renew: 'Renew Lease', edit: 'Edit Lease' }[leaseDialog.mode])}

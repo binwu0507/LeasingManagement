@@ -60,7 +60,7 @@ export default function PropertyTable({ properties, onEdit, onDelete, onPayments
           <td>{t('Annual totals')}</td>
           {MONEY_COLUMNS.map((col, i) => (
             <Fragment key={col.field}>
-              <td className={`num ${col.field === 'yearlyRent' ? 'income' : 'cost'}`}>{money.format(totals[col.field])}</td>
+              <td className={`num ${col.field === 'yearlyRent' || col.field === 'specialIncome' ? 'income' : 'cost'}`}>{money.format(totals[col.field])}</td>
               {i === 0 && <td className="num">{totals.vacantDays}</td>}
             </Fragment>
           ))}

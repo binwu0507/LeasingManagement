@@ -11,7 +11,7 @@ export default function PropertyRow({ property: p, onEdit, onDelete, onPayments,
       <td>{p.address}</td>
       {MONEY_COLUMNS.map((col, i) => (
         <Fragment key={col.field}>
-          <td className={`num ${col.field === 'yearlyRent' ? 'income' : 'cost'}`}>
+          <td className={`num ${col.field === 'yearlyRent' || col.field === 'specialIncome' ? 'income' : 'cost'}`}>
             <div className="amount-cell">
             {col.field === 'yearlyRent' && (
               <button type="button" className="icon-btn inline" onClick={() => onPayments(p)}

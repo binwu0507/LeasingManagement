@@ -95,9 +95,9 @@ function buildXlsx(sheets) {
   return buildZip(files, { keepPaths: true });
 }
 
-// Net income, as in the table: rent - HOA - interest - tax - insurance - repairs.
+// Net income, as in the table: rent + special income - HOA - interest - tax - insurance - repairs.
 const net = (r) =>
-  (r.yearlyRent || 0) - (r.yearlyHoa || 0) - (r.mortgageInterest || 0) - (r.propertyTax || 0) - (r.insurance || 0) - (r.repairCost || 0);
+  (r.yearlyRent || 0) + (r.specialIncome || 0) - (r.yearlyHoa || 0) - (r.mortgageInterest || 0) - (r.propertyTax || 0) - (r.insurance || 0) - (r.repairCost || 0);
 
 // Excel sheet names: at most 31 characters, none of []:*?/\ , unique ignoring case.
 function sheetName(address, used) {
@@ -112,7 +112,7 @@ function sheetName(address, used) {
 
 function propertySheet(r, name, tenantNames) {
   const leases = store.listLeases(r.propertyId)
-    .filter((l) => l.startDate <= `${r.year}-12-31` && l.endDate >= `${r.year}-01-01`);
+    .filter((l) => l.startDate <= `${r.year}-12-31` && (l.earlyTermination ? l.moveOutDate : l.endDate) >= `${r.year}-01-01`);
   const payments = store.listYearPayments(r.propertyId, r.year).slice().reverse(); // oldest first
   const rentReceived = payments.filter((p) => p.paymentType === 'Rent').reduce((s, p) => s + p.amount, 0);
   const place = [r.city, r.state, r.zip].filter(Boolean).join(', ');
@@ -122,6 +122,7 @@ function propertySheet(r, name, tenantNames) {
     [],
     [text('Yearly summary', S.bold)],
     [text('Rent'), money(r.yearlyRent)],
+    [text('Special income'), money(r.specialIncome)],
     [text('HOA'), money(r.yearlyHoa)],
     [text('Mortgage interest'), money(r.mortgageInterest)],
     [text('Property tax'), money(r.propertyTax)],
@@ -139,7 +140,7 @@ function propertySheet(r, name, tenantNames) {
   }
   for (const l of leases) {
     rows.push([date(l.startDate), date(l.endDate), money(l.monthlyRent), date(l.moveInDate), date(l.moveOutDate),
-      text(l.tenants.map((t) => tenantNames.get(t.tenantId)).filter(Boolean).join(', '))]);
+      text((l.earlyTermination ? 'Early termination; ' : '') + l.tenants.map((t) => tenantNames.get(t.tenantId)).filter(Boolean).join(', '))]);
   }
   rows.push([], [text(`Payments for ${r.year}`, S.bold)],
     head(['Date', 'Type', 'For month', 'Tenant(s)', 'Method', 'Amount', 'Returned date', 'Returned amount'], [5, 7]));
@@ -147,7 +148,7 @@ function propertySheet(r, name, tenantNames) {
     rows.push([text('None')]);
   }
   for (const p of payments) {
-    rows.push([date(p.paymentDate), text(p.paymentType), text(p.forMonth || ''), text(p.tenantNames.join(', ')),
+    rows.push([date(p.paymentDate), text(p.paymentType === 'Special' ? `Special: ${p.specialCategory}` : p.paymentType), text(p.forMonth || ''), text(p.tenantNames.join(', ')),
       text(p.paymentMethod || ''), money(p.amount), date(p.returnedDate), money(p.returnedAmount)]);
   }
   rows.push([text('Rent received', S.bold), text(''), text(''), text(''), text(''), money(rentReceived, S.moneyBold)]);
@@ -173,31 +174,31 @@ function yearWorkbook(yearValue) {
   const used = new Set(['summary']);
   const names = records.map((r) => sheetName(r.address, used));
 
-  const totals = { yearlyRent: 0, mortgage: 0, mortgageInterest: 0, yearlyHoa: 0, propertyTax: 0, insurance: 0, repairCost: 0, vacantDays: 0, net: 0 };
+  const totals = { yearlyRent: 0, specialIncome: 0, mortgage: 0, mortgageInterest: 0, yearlyHoa: 0, propertyTax: 0, insurance: 0, repairCost: 0, vacantDays: 0, net: 0 };
   const summaryRows = [
     [text(`Properties ${year} — summary`, S.title)],
     [],
-    head(['Address', 'City', 'State', 'Zip', 'Rent / yr', 'Vacant days', 'Mortgage / mo', 'Mortgage interest / yr', 'HOA / yr', 'Tax / yr', 'Insurance / yr', 'Repairs', 'Net / yr'],
-      [4, 5, 6, 7, 8, 9, 10, 11, 12])
+    head(['Address', 'City', 'State', 'Zip', 'Rent / yr', 'Special income', 'Vacant days', 'Mortgage / mo', 'Mortgage interest / yr', 'HOA / yr', 'Tax / yr', 'Insurance / yr', 'Repairs', 'Net / yr'],
+      [4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
   ];
   for (const r of records) {
     const n = net(r);
     totals.net += n;
     totals.vacantDays += r.vacantDays;
-    for (const f of ['yearlyRent', 'mortgageInterest', 'yearlyHoa', 'propertyTax', 'insurance', 'repairCost']) {
+    for (const f of ['yearlyRent', 'specialIncome', 'mortgageInterest', 'yearlyHoa', 'propertyTax', 'insurance', 'repairCost']) {
       totals[f] += r[f] || 0;
     }
     totals.mortgage += (r.mortgage || 0) * 12; // the total row shows yearly mortgage, like the app's totals
-    summaryRows.push([text(r.address), text(r.city), text(r.state || ''), text(r.zip || ''), money(r.yearlyRent), int(r.vacantDays),
+    summaryRows.push([text(r.address), text(r.city), text(r.state || ''), text(r.zip || ''), money(r.yearlyRent), money(r.specialIncome), int(r.vacantDays),
       money(r.mortgage), money(r.mortgageInterest), money(r.yearlyHoa), money(r.propertyTax), money(r.insurance), money(r.repairCost), money(n)]);
   }
-  summaryRows.push([text('Annual totals', S.bold), text(''), text(''), text(''), money(totals.yearlyRent, S.moneyBold),
+  summaryRows.push([text('Annual totals', S.bold), text(''), text(''), text(''), money(totals.yearlyRent, S.moneyBold), money(totals.specialIncome, S.moneyBold),
     { ...int(totals.vacantDays), s: S.bold }, money(totals.mortgage, S.moneyBold), money(totals.mortgageInterest, S.moneyBold),
     money(totals.yearlyHoa, S.moneyBold), money(totals.propertyTax, S.moneyBold), money(totals.insurance, S.moneyBold),
     money(totals.repairCost, S.moneyBold), money(totals.net, S.moneyBold)]);
 
   const sheets = [
-    { name: 'Summary', rows: summaryRows, widths: [28, 16, 8, 10, 14, 12, 14, 20, 12, 12, 14, 12, 14] },
+    { name: 'Summary', rows: summaryRows, widths: [28, 16, 8, 10, 14, 14, 12, 14, 20, 12, 12, 14, 12, 14] },
     ...records.map((r, i) => propertySheet(r, names[i], tenantNames))
   ];
   return { fileName: `Properties_${year}_report.xlsx`, data: buildXlsx(sheets) };

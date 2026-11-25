@@ -25,7 +25,9 @@ function oldDatabase() {
   raw.exec(`
     ALTER TABLE property_years DROP COLUMN hoaFrequency; -- added by the v26 step
     ALTER TABLE property_years DROP COLUMN hoaAmounts;
+    ALTER TABLE leases DROP COLUMN earlyTermination; -- added by the v27 step
     DROP TABLE lease_payments;
+    DROP TABLE special_categories;
     DROP TABLE receiving_banks;
     DROP TABLE payment_methods;
     CREATE TABLE lease_payments (
@@ -53,7 +55,7 @@ function oldDatabase() {
   return { file, property: p };
 }
 
-describe('migration v21 -> v26', () => {
+describe('migration v21 -> v27', () => {
   it('keeps every payment and turns the method text into a reference', () => {
     const { property } = oldDatabase();
     const rows = store.listYearPayments(property.id, 2025);
@@ -84,11 +86,17 @@ describe('migration v21 -> v26', () => {
     raw.close();
   });
 
+  it('leaves existing leases unflagged and adds the special categories', () => {
+    const { property } = oldDatabase();
+    expect(store.listLeases(property.id).every((l) => l.earlyTermination === 0)).toBe(true);
+    expect(store.listLookup('specialCategories')).toHaveLength(4);
+  });
+
   it('ends at the current schema version', () => {
     const { file } = oldDatabase();
     store.close();
     const raw = new DatabaseSync(file);
-    expect(raw.prepare('PRAGMA user_version').get().user_version).toBe(26);
+    expect(raw.prepare('PRAGMA user_version').get().user_version).toBe(27);
     raw.close();
   });
 });

@@ -900,6 +900,10 @@ tbody tr.row-expiring, tbody tr.row-expiring:hover { background: rgba(251, 146, 
 .calc-panel > button { width: 100%; }
 
 /* Payments dialog */
+.pay-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; background: var(--surface); }
+.pay-card h3 { font-size: 0.95rem; margin: 0 0 8px; }
+.pay-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.pay-card-head h3 { margin: 0; }
 .payments-scroll { max-height: 60vh; overflow-y: auto; margin-bottom: 8px; }
 .payments-table { width: 100%; border-collapse: collapse; }
 .payments-table th, .payments-table td { padding: 4px 8px; vertical-align: middle; white-space: nowrap; }
@@ -926,3 +930,20 @@ tbody tr.row-expiring, tbody tr.row-expiring:hover { background: rgba(251, 146, 
 .email-form { display: flex; flex-direction: column; gap: 8px; max-width: 420px; }
 .email-form label { display: flex; flex-direction: column; gap: 4px; margin: 0; }
 .email-form .hint { margin: 0; }
+
+/* Early termination: inline link-style button, banner and badge */
+.link-btn { background: none; border: none; padding: 0; color: var(--primary); cursor: pointer; text-decoration: underline; font: inherit; }
+.link-btn:hover { color: var(--primary-hover); }
+.termination-badge { display: block; font-size: 0.8rem; }
+.termination-banner { margin: 8px 0; }
+.special-income { margin-top: 12px; }
+.pay-card h3 .group-toggle { all: unset; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font: inherit; font-weight: 600; }
+.pay-card h3 .group-toggle:focus-visible { outline: 2px solid var(--primary, #2563eb); }
+
+/* Manage Lease table: keep the Action column inside the dialog (tenants and the termination badge wrap) */
+.manage-lease fieldset.leases { min-width: 0; }
+.manage-lease .repair-scroll { max-height: none; overflow-x: auto; }
+.lease-table td:nth-child(5) .termination-badge { white-space: normal; max-width: 150px; text-align: left; }
+.lease-table th:nth-child(5), .lease-table td:nth-child(5) { width: 150px; }
+.lease-table th:nth-child(6), .lease-table td:nth-child(6) { white-space: normal; min-width: 150px; }
+.lease-table th:nth-child(7), .lease-table td:nth-child(7) { width: 1%; white-space: nowrap; }

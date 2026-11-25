@@ -9,9 +9,9 @@ const money = (v) => fmt.format(v || 0);
 const optMoney = (v) => (v === null || v === undefined ? '—' : fmt.format(v));
 const usDate = (s) => (s ? s.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$2/$3/$1') : '');
 
-// Same formula as the table: rent - HOA - interest - tax - insurance - repairs.
+// Same formula as the table: rent + special income - HOA - interest - tax - insurance - repairs.
 const net = (r) =>
-  (r.yearlyRent || 0) - (r.yearlyHoa || 0) - (r.mortgageInterest || 0) - (r.propertyTax || 0) - (r.insurance || 0) - (r.repairCost || 0);
+  (r.yearlyRent || 0) + (r.specialIncome || 0) - (r.yearlyHoa || 0) - (r.mortgageInterest || 0) - (r.propertyTax || 0) - (r.insurance || 0) - (r.repairCost || 0);
 
 function table(headers, rows, numericCols = []) {
   if (rows.length === 0) {
@@ -29,7 +29,7 @@ function buildHtml(yearRecordId) {
     throw new Error('Property year not found.');
   }
   const leases = store.listLeases(r.propertyId)
-    .filter((l) => l.startDate <= `${r.year}-12-31` && l.endDate >= `${r.year}-01-01`);
+    .filter((l) => l.startDate <= `${r.year}-12-31` && (l.earlyTermination ? l.moveOutDate : l.endDate) >= `${r.year}-01-01`);
   const payments = store.listYearPayments(r.propertyId, r.year).slice().reverse(); // oldest first
   const rentReceived = payments.filter((p) => p.paymentType === 'Rent').reduce((s, p) => s + p.amount, 0);
   const netValue = net(r);
@@ -37,6 +37,7 @@ function buildHtml(yearRecordId) {
 
   const lines = [
     ['Rent', r.yearlyRent, false],
+    ['Special income', r.specialIncome, false],
     ['HOA', r.yearlyHoa, true],
     ['Mortgage interest', r.mortgageInterest, true],
     ['Property tax', r.propertyTax, true],
@@ -72,11 +73,12 @@ function buildHtml(yearRecordId) {
 
     <h2>Leases in ${esc(r.year)}</h2>
     ${table(['Start', 'End', 'Monthly rent', 'Move-in', 'Move-out'],
-      leases.map((l) => [usDate(l.startDate), usDate(l.endDate), money(l.monthlyRent), usDate(l.moveInDate), usDate(l.moveOutDate)]), [2])}
+      leases.map((l) => [usDate(l.startDate), usDate(l.endDate), money(l.monthlyRent), usDate(l.moveInDate),
+        usDate(l.moveOutDate) + (l.earlyTermination ? ' (early termination)' : '')]), [2])}
 
     <h2>Payments for ${esc(r.year)}</h2>
     ${table(['Date', 'Type', 'For month', 'Tenant(s)', 'Method', 'Amount'],
-      payments.map((p) => [usDate(p.paymentDate), p.paymentType, p.forMonth || '', p.tenantNames.join(', '), p.paymentMethod || '', money(p.amount)]), [5])}
+      payments.map((p) => [usDate(p.paymentDate), p.paymentType === 'Special' ? `Special: ${p.specialCategory}` : p.paymentType, p.forMonth || '', p.tenantNames.join(', '), p.paymentMethod || '', money(p.amount)]), [5])}
     <p class="sub">Rent received for ${esc(r.year)}: <b>${money(rentReceived)}</b></p>
 
     <h2>Repairs</h2>

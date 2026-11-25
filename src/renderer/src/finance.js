@@ -12,16 +12,18 @@ export const sum = (list, field) => list.reduce((total, p) => total + (p[field] 
 
 // Yearly net income for one property: rent minus all costs.
 // Uses annual mortgage interest (not the mortgage payment).
+// Special income (early termination charges, late fees, deposit received minus returned, ...) is added
+// on its own; it is never counted as rent.
 export const netIncome = (p) =>
-  (p.yearlyRent - p.yearlyHoa) -
+  (p.yearlyRent + (p.specialIncome || 0) - p.yearlyHoa) -
   (p.mortgageInterest || 0) - (p.propertyTax || 0) - (p.insurance || 0) - (p.repairCost || 0);
 
 // Tooltip text showing how the net amount of `p` (a property, or the totals row) is worked out.
 export function netFormula(p, t, net = netIncome(p)) {
   const m = (v) => money.format(v || 0);
   return [
-    `${t('Net')} = ${t('Rent')} − ${t('HOA')} − ${t('Mortgage interest')} − ${t('Tax')} − ${t('Insurance')} − ${t('Repairs')}`,
-    `= ${m(p.yearlyRent)} − ${m(p.yearlyHoa)} − ${m(p.mortgageInterest)} − ${m(p.propertyTax)} − ${m(p.insurance)} − ${m(p.repairCost)}`,
+    `${t('Net')} = ${t('Rent')} + ${t('Special income')} − ${t('HOA')} − ${t('Mortgage interest')} − ${t('Tax')} − ${t('Insurance')} − ${t('Repairs')}`,
+    `= ${m(p.yearlyRent)} + ${m(p.specialIncome)} − ${m(p.yearlyHoa)} − ${m(p.mortgageInterest)} − ${m(p.propertyTax)} − ${m(p.insurance)} − ${m(p.repairCost)}`,
     `= ${money.format(net)}`
   ].join('\n');
 }
@@ -30,6 +32,7 @@ export function netFormula(p, t, net = netIncome(p)) {
 // (Rent and HOA are stored yearly; only the mortgage payment is monthly.)
 export const MONEY_COLUMNS = [
   { field: 'yearlyRent', header: 'Rent / yr' },
+  { field: 'specialIncome', header: 'Special income' },
   { field: 'mortgage', header: 'Mortgage / mo', monthly: true },
   { field: 'mortgageInterest', header: 'Mortgage Interest / yr', optional: true },
   { field: 'yearlyHoa', header: 'HOA / yr' },
@@ -49,7 +52,7 @@ export function annualTotals(properties) {
 }
 
 export function yearlySummary(properties) {
-  const rentIncome = sum(properties, 'yearlyRent');
+  const rentIncome = sum(properties, 'yearlyRent') + sum(properties, 'specialIncome');
   const expenses =
     sum(properties, 'mortgageInterest') +
     sum(properties, 'yearlyHoa') +

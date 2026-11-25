@@ -4,7 +4,11 @@ const path = require('path');
 const { app } = require('electron');
 const { DatabaseSync } = require('node:sqlite');
 
-const SCHEMA_VERSION = 26;
+const SCHEMA_VERSION = 27;
+// A lease's last day for overlap, rent, vacancy and late checks: the move-out date once the lease was
+// ended early (earlyTermination = 1, set by store.js), otherwise the contract end date. Needs a `leases`
+// table or alias named `l`.
+const EFFECTIVE_END = `(CASE WHEN l.earlyTermination = 1 THEN l.moveOutDate ELSE l.endDate END)`;
 // Describe the house itself; stored once in `properties`.
 const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
 // House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
@@ -118,6 +122,15 @@ function cleanLeases(leases) {
     if (clean.moveInDate && clean.moveOutDate && clean.moveOutDate < clean.moveInDate) {
       throw new Error(`Lease ${n}: move-out date cannot be before the move-in date.`);
     }
+    if (clean.moveInDate && clean.moveInDate < clean.startDate) {
+      throw new Error(`Lease ${n}: move-in date cannot be before the lease start date.`);
+    }
+    if (clean.moveOutDate && clean.moveOutDate > clean.endDate) {
+      throw new Error(`Lease ${n}: move-out date cannot be after the lease end date.`);
+    }
+    // Moving out before the contract end is an early termination; the app sets this, never the caller.
+    clean.earlyTermination = clean.moveOutDate !== null && clean.moveOutDate < clean.endDate ? 1 : 0;
+    clean.lastDay = clean.earlyTermination ? clean.moveOutDate : clean.endDate;
     return clean;
   });
 }
@@ -525,6 +538,50 @@ function init(dbPath) {
       ALTER TABLE property_years ADD COLUMN hoaAmounts TEXT;
     `);
   }
+  if (version < 27) {
+    // Early termination and special income. A lease ended before its contract end date carries a flag
+    // (existing leases stay 0, so old display-only move-out dates change nothing). Special income items
+    // (early termination charge, pet charge, late fee, ...) are lease payments of the new type 'Special'
+    // with a category from an admin-managed list. The table is rebuilt because the paymentType CHECK changes.
+    db.exec(`
+      BEGIN;
+      ALTER TABLE leases ADD COLUMN earlyTermination INTEGER NOT NULL DEFAULT 0 CHECK (earlyTermination IN (0, 1));
+      CREATE TABLE special_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+      );
+      INSERT INTO special_categories (name) VALUES
+        ('Early Termination Charge'), ('Pet Charge'), ('Late Fee'), ('Other');
+      CREATE TABLE lease_payments_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        leaseId INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+        paymentType TEXT NOT NULL CHECK (paymentType IN ('Rent', 'Security Deposit', 'Special')),
+        rentKind TEXT CHECK (rentKind IN ('Full Month', 'Prorate')),
+        amount REAL NOT NULL CHECK (amount >= 0),
+        paymentDate TEXT NOT NULL,
+        returnedDate TEXT,
+        returnedAmount REAL CHECK (returnedAmount IS NULL OR returnedAmount >= 0),
+        paymentMethodId INTEGER REFERENCES payment_methods(id) ON DELETE RESTRICT,
+        receivingBankId INTEGER REFERENCES receiving_banks(id) ON DELETE RESTRICT,
+        forMonth TEXT,
+        specialCategoryId INTEGER REFERENCES special_categories(id) ON DELETE RESTRICT,
+        CHECK ((paymentType = 'Rent') = (rentKind IS NOT NULL)),
+        CHECK (paymentType = 'Security Deposit' OR returnedDate IS NULL),
+        CHECK ((paymentType = 'Special') = (specialCategoryId IS NOT NULL))
+      );
+      INSERT INTO lease_payments_new
+        (id, leaseId, paymentType, rentKind, amount, paymentDate, returnedDate, returnedAmount,
+         paymentMethodId, receivingBankId, forMonth)
+        SELECT id, leaseId, paymentType, rentKind, amount, paymentDate, returnedDate, returnedAmount,
+         paymentMethodId, receivingBankId, forMonth FROM lease_payments;
+      DROP TABLE lease_payments;
+      ALTER TABLE lease_payments_new RENAME TO lease_payments;
+      CREATE INDEX idx_lease_payments_lease ON lease_payments (leaseId);
+      CREATE UNIQUE INDEX idx_one_deposit_per_lease
+        ON lease_payments (leaseId) WHERE paymentType = 'Security Deposit';
+      COMMIT;
+    `);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -551,7 +608,7 @@ function cleanHoa(data) {
   return { frequency: data.hoaFrequency, amounts, total: Math.round(amounts.reduce((s, a) => s + a, 0) * 100) / 100 };
 }
 
-const PAYMENT_TYPES = ['Rent', 'Security Deposit'];
+const PAYMENT_TYPES = ['Rent', 'Security Deposit', 'Special'];
 const RENT_KINDS = ['Full Month', 'Prorate'];
 
 // Normalize and check a payment: amount, date, type and (for rent) whether it is a full or prorated month.
@@ -565,7 +622,8 @@ function validatePayment(data) {
     paymentDate: text(d.paymentDate),
     paymentMethodId: Number(d.paymentMethodId),
     receivingBankId: Number(d.receivingBankId),
-    forMonth: text(d.forMonth) || null
+    forMonth: text(d.forMonth) || null,
+    specialCategoryId: d.specialCategoryId === undefined || d.specialCategoryId === null ? null : Number(d.specialCategoryId)
   };
   if (!db.prepare('SELECT 1 FROM payment_methods WHERE id = ?').get(clean.paymentMethodId)) {
     throw new Error('Choose a payment method.');
@@ -574,7 +632,14 @@ function validatePayment(data) {
     throw new Error('Choose a receiving bank.');
   }
   if (!PAYMENT_TYPES.includes(clean.paymentType)) {
-    throw new Error('Payment type must be Rent or Security Deposit.');
+    throw new Error('Payment type must be Rent, Security Deposit or Special.');
+  }
+  if (clean.paymentType === 'Special') {
+    if (!db.prepare('SELECT 1 FROM special_categories WHERE id = ?').get(clean.specialCategoryId)) {
+      throw new Error('Choose a category.');
+    }
+  } else {
+    clean.specialCategoryId = null;
   }
   if (clean.paymentType === 'Rent' && !RENT_KINDS.includes(clean.rentKind)) {
     throw new Error('A rent payment must be Full Month or Prorate.');
@@ -684,11 +749,11 @@ function listTenants() {
   const t = new Date();
   const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
   const active = db.prepare(`
-    SELECT p.address, p.city, p.purchaseDate, l.startDate, l.endDate
+    SELECT p.address, p.city, p.purchaseDate, l.startDate, ${EFFECTIVE_END} AS endDate
     FROM lease_tenants lt
     JOIN leases l ON l.id = lt.leaseId
     JOIN properties p ON p.id = l.propertyId
-    WHERE lt.tenantId = ? AND l.startDate <= ? AND l.endDate >= ?
+    WHERE lt.tenantId = ? AND l.startDate <= ? AND ${EFFECTIVE_END} >= ?
     ORDER BY l.startDate DESC LIMIT 1
   `);
   // `hasLease`: linked to any lease (past, current or future), so the record is real data worth keeping.
@@ -932,7 +997,11 @@ const SELECT_HOUSE = `SELECT id, ${PROPERTY_FIELDS.join(', ')} FROM properties`;
 
 // `agreementName` is the uploaded lease agreement's file name, or null when there is none.
 // `fileCount` is the number of downloadable files (agreement + documents).
-const SELECT_LEASE = `SELECT id, startDate, endDate, monthlyRent, moveInDate, moveOutDate,
+const SELECT_LEASE = `SELECT id, startDate, endDate, monthlyRent, moveInDate, moveOutDate, earlyTermination,
+  (SELECT COUNT(*) FROM lease_payments s WHERE s.leaseId = leases.id AND s.paymentType = 'Special'
+    AND s.specialCategoryId = (SELECT id FROM special_categories WHERE name = 'Early Termination Charge')) AS terminationChargeCount,
+  (SELECT SUM(s.amount) FROM lease_payments s WHERE s.leaseId = leases.id AND s.paymentType = 'Special'
+    AND s.specialCategoryId = (SELECT id FROM special_categories WHERE name = 'Early Termination Charge')) AS terminationCharge,
   (SELECT fileName FROM lease_agreements a WHERE a.leaseId = leases.id) AS agreementName,
   (SELECT COUNT(*) FROM lease_agreements a WHERE a.leaseId = leases.id)
     + (SELECT COUNT(*) FROM lease_documents d WHERE d.leaseId = leases.id) AS fileCount FROM leases`;
@@ -953,14 +1022,15 @@ function listLeases(propertyId) {
 
 // Replace a lease's tenant links with the given (already validated) list.
 function setLeaseTenants(leaseId, tenants) {
-  const { startDate, endDate } = db.prepare('SELECT startDate, endDate FROM leases WHERE id = ?').get(leaseId);
-  // A person cannot be on two leases whose terms overlap (dates are inclusive).
+  const { startDate, endDate } = db.prepare(`SELECT startDate, ${EFFECTIVE_END} AS endDate FROM leases l WHERE id = ?`).get(leaseId);
+  // A person cannot be on two leases whose terms overlap (dates are inclusive; an early-terminated
+  // lease ends at its move-out date).
   const clash = db.prepare(`
-    SELECT l.startDate, l.endDate, p.address, p.city
+    SELECT l.startDate, ${EFFECTIVE_END} AS endDate, p.address, p.city
     FROM lease_tenants lt
     JOIN leases l ON l.id = lt.leaseId
     JOIN properties p ON p.id = l.propertyId
-    WHERE lt.tenantId = ? AND l.id <> ? AND l.startDate <= ? AND l.endDate >= ?
+    WHERE lt.tenantId = ? AND l.id <> ? AND l.startDate <= ? AND ${EFFECTIVE_END} >= ?
     ORDER BY l.startDate LIMIT 1
   `);
   const nameOf = db.prepare('SELECT firstName, lastName FROM tenants WHERE id = ?');
@@ -986,9 +1056,9 @@ function setLeaseTenants(leaseId, tenants) {
 // A property cannot have two leases whose terms overlap (dates inclusive).
 function assertNoPropertyOverlap(propertyId, excludeLeaseId, startDate, endDate) {
   const c = db.prepare(`
-    SELECT startDate, endDate FROM leases
-    WHERE propertyId = ? AND id <> ? AND startDate <= ? AND endDate >= ?
-    ORDER BY startDate LIMIT 1
+    SELECT l.startDate, ${EFFECTIVE_END} AS endDate FROM leases l
+    WHERE l.propertyId = ? AND l.id <> ? AND l.startDate <= ? AND ${EFFECTIVE_END} >= ?
+    ORDER BY l.startDate LIMIT 1
   `).get(propertyId, excludeLeaseId, endDate, startDate);
   if (c) {
     throw new Error(`This lease term (${startDate} to ${endDate}) overlaps an existing lease of this property `
@@ -1002,13 +1072,14 @@ function addLease(propertyId, data) {
   if (!db.prepare('SELECT 1 FROM properties WHERE id = ?').get(propertyId)) {
     throw new Error('Property not found.');
   }
-  assertNoPropertyOverlap(propertyId, -1, clean.startDate, clean.endDate);
+  assertNoPropertyOverlap(propertyId, -1, clean.startDate, clean.lastDay);
   db.exec('BEGIN');
   try {
     const { lastInsertRowid } = db.prepare(`
-      INSERT INTO leases (propertyId, startDate, endDate, monthlyRent, moveInDate, moveOutDate)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(propertyId, clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate);
+      INSERT INTO leases (propertyId, startDate, endDate, monthlyRent, moveInDate, moveOutDate, earlyTermination)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(propertyId, clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate,
+      clean.earlyTermination);
     setLeaseTenants(Number(lastInsertRowid), clean.tenants);
     db.exec('COMMIT');
     return withTenants(db.prepare(`${SELECT_LEASE} WHERE id = ?`).get(Number(lastInsertRowid)));
@@ -1018,18 +1089,37 @@ function addLease(propertyId, data) {
   }
 }
 
+// The category every early termination charge uses (seeded by migration v27, protected by name in the UI text).
+const TERMINATION_CATEGORY = 'Early Termination Charge';
+const terminationChargeCount = (leaseId, exceptPaymentId = -1) => db.prepare(`
+  SELECT COUNT(*) AS n FROM lease_payments
+  WHERE leaseId = ? AND id <> ? AND paymentType = 'Special'
+    AND specialCategoryId = (SELECT id FROM special_categories WHERE name = ?)`).get(leaseId, exceptPaymentId, TERMINATION_CATEGORY).n;
+
 function updateLease(id, data) {
   const [clean] = cleanLeases([data]);
-  const existing = db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(id);
+  const existing = db.prepare('SELECT propertyId, earlyTermination FROM leases WHERE id = ?').get(id);
   if (!existing) {
     throw new Error('Lease not found.');
   }
-  assertNoPropertyOverlap(existing.propertyId, id, clean.startDate, clean.endDate);
+  assertNoPropertyOverlap(existing.propertyId, id, clean.startDate, clean.lastDay);
+  // Removing the early move-out while an early termination charge is recorded would leave a charge on a
+  // lease that did not end early: the caller must say the charge is to be deleted.
+  const dropsCharge = existing.earlyTermination === 1 && clean.earlyTermination === 0 && terminationChargeCount(id) > 0;
+  if (dropsCharge && !(data && data.deleteTerminationCharge === true)) {
+    throw new Error('This lease has an early termination charge. Confirm deleting it to remove the early move-out.');
+  }
   db.exec('BEGIN');
   try {
+    if (dropsCharge) {
+      db.prepare(`DELETE FROM lease_payments WHERE leaseId = ? AND paymentType = 'Special'
+        AND specialCategoryId = (SELECT id FROM special_categories WHERE name = ?)`).run(id, TERMINATION_CATEGORY);
+    }
     db.prepare(`
-      UPDATE leases SET startDate = ?, endDate = ?, monthlyRent = ?, moveInDate = ?, moveOutDate = ? WHERE id = ?
-    `).run(clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate, id);
+      UPDATE leases SET startDate = ?, endDate = ?, monthlyRent = ?, moveInDate = ?, moveOutDate = ?, earlyTermination = ?
+      WHERE id = ?
+    `).run(clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate,
+      clean.earlyTermination, id);
     setLeaseTenants(id, clean.tenants);
     db.exec('COMMIT');
   } catch (err) {
@@ -1052,8 +1142,10 @@ function listYearPayments(propertyId, yearValue) {
     WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`);
   return db.prepare(`
     SELECT pay.id, pay.leaseId, pay.paymentType, pay.rentKind, pay.amount, pay.paymentDate, pay.forMonth, pay.paymentMethodId,
-      pm.name AS paymentMethod, pay.receivingBankId, rb.name AS receivingBank, pay.returnedDate, pay.returnedAmount, l.startDate, l.endDate
+      pm.name AS paymentMethod, pay.receivingBankId, rb.name AS receivingBank, pay.returnedDate, pay.returnedAmount, l.startDate, ${EFFECTIVE_END} AS endDate,
+      pay.specialCategoryId, sc.name AS specialCategory
     FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
+    LEFT JOIN special_categories sc ON sc.id = pay.specialCategoryId
     LEFT JOIN payment_methods pm ON pm.id = pay.paymentMethodId
     LEFT JOIN receiving_banks rb ON rb.id = pay.receivingBankId
     WHERE l.propertyId = ? AND (
@@ -1068,7 +1160,7 @@ function listYearPayments(propertyId, yearValue) {
 
 // Rent can only be recorded for a month the lease covers at least in part (dates inclusive).
 function assertMonthInLease(leaseId, forMonth) {
-  const { startDate, endDate } = db.prepare('SELECT startDate, endDate FROM leases WHERE id = ?').get(leaseId);
+  const { startDate, endDate } = db.prepare(`SELECT startDate, ${EFFECTIVE_END} AS endDate FROM leases l WHERE id = ?`).get(leaseId);
   const [y, m] = forMonth.split('-').map(Number);
   const first = `${forMonth}-01`;
   const last = `${forMonth}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
@@ -1228,6 +1320,75 @@ function returnDeposit(leaseId, data) {
   return getDeposit(leaseId);
 }
 
+// Special income (early termination charge, pet charge, late fee, ...): one-off income items tied to a
+// lease, counted in the property-year of their payment date. Never rent, never late.
+function specialYearCheck(leaseId, paymentDate) {
+  const { propertyId } = db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(leaseId);
+  const has = db.prepare('SELECT 1 FROM property_years WHERE propertyId = ? AND year = ?')
+    .get(propertyId, Number(paymentDate.slice(0, 4)));
+  // The item is saved either way and counts once the house is added to that year.
+  return { yearMissing: !has };
+}
+
+// An early termination charge exists only on a lease that ended early, once.
+function assertTerminationCharge(leaseId, clean, paymentId = -1) {
+  const cat = db.prepare('SELECT name FROM special_categories WHERE id = ?').get(clean.specialCategoryId);
+  if (!cat || cat.name !== TERMINATION_CATEGORY) {
+    return;
+  }
+  if (!db.prepare('SELECT earlyTermination FROM leases WHERE id = ?').get(leaseId).earlyTermination) {
+    throw new Error('This lease did not end early. Set the move-out date before the lease end date first.');
+  }
+  if (terminationChargeCount(leaseId, paymentId) > 0) {
+    throw new Error('This lease already has an early termination charge; edit it instead.');
+  }
+}
+
+function addSpecialPayment(leaseId, data) {
+  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
+    throw new Error('Lease not found.');
+  }
+  const clean = validatePayment({ ...(data || {}), paymentType: 'Special' });
+  assertTerminationCharge(leaseId, clean);
+  const { lastInsertRowid } = db.prepare(`INSERT INTO lease_payments
+    (leaseId, paymentType, amount, paymentDate, paymentMethodId, receivingBankId, specialCategoryId)
+    VALUES (?, 'Special', ?, ?, ?, ?, ?)`)
+    .run(leaseId, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, clean.specialCategoryId);
+  return { id: Number(lastInsertRowid), ...specialYearCheck(leaseId, clean.paymentDate) };
+}
+
+function updateSpecialPayment(id, data) {
+  const before = db.prepare(`SELECT leaseId FROM lease_payments WHERE id = ? AND paymentType = 'Special'`).get(id);
+  if (!before) {
+    throw new Error('Special income item not found.');
+  }
+  const clean = validatePayment({ ...(data || {}), paymentType: 'Special' });
+  assertTerminationCharge(before.leaseId, clean, id);
+  db.prepare(`UPDATE lease_payments SET amount = ?, paymentDate = ?, paymentMethodId = ?, receivingBankId = ?,
+    specialCategoryId = ? WHERE id = ?`)
+    .run(clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, clean.specialCategoryId, id);
+  return { id, ...specialYearCheck(before.leaseId, clean.paymentDate) };
+}
+
+function deleteSpecialPayment(id) {
+  db.prepare(`DELETE FROM lease_payments WHERE id = ? AND paymentType = 'Special'`).run(id);
+}
+
+// Special income of a house-year: special items by payment date, plus security deposits received (by
+// payment date) minus the amounts returned (by returned date).
+function specialIncome(propertyId, year) {
+  const y = String(year);
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN pay.paymentType IN ('Special', 'Security Deposit') AND substr(pay.paymentDate, 1, 4) = ?
+        THEN pay.amount END), 0)
+      - COALESCE(SUM(CASE WHEN pay.paymentType = 'Security Deposit' AND substr(pay.returnedDate, 1, 4) = ?
+        THEN pay.returnedAmount END), 0) AS total
+    FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId WHERE l.propertyId = ?
+  `).get(y, y, propertyId);
+  return Math.round(row.total * 100) / 100;
+}
+
 const MAX_AGREEMENT_BYTES =25 * 1024 * 1024;
 
 function setLeaseAgreement(leaseId, fileName, data) {
@@ -1364,7 +1525,8 @@ function deleteDocumentType(id) {
 // Receiving banks and payment methods (Admin > Financial): simple unique-name lists.
 const LOOKUPS = {
   receivingBanks: { table: 'receiving_banks', label: 'receiving bank' },
-  paymentMethods: { table: 'payment_methods', label: 'payment method' }
+  paymentMethods: { table: 'payment_methods', label: 'payment method' },
+  specialCategories: { table: 'special_categories', label: 'special income category' }
 };
 function lookup(kind) {
   const l = Object.hasOwn(LOOKUPS, kind) ? LOOKUPS[kind] : null;
@@ -1423,7 +1585,7 @@ function listProperties() {
   const t = new Date();
   const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
   const current = db.prepare(
-    'SELECT MAX(endDate) AS endDate FROM leases WHERE propertyId = ? AND startDate <= ? AND endDate >= ?');
+    `SELECT MAX(${EFFECTIVE_END}) AS endDate FROM leases l WHERE l.propertyId = ? AND l.startDate <= ? AND ${EFFECTIVE_END} >= ?`);
   const late = new Set(latePayments().items.map((i) => i.propertyId)); // rent unpaid this month
   return db.prepare(`${SELECT_HOUSE} ORDER BY lower(address), id`).all()
     .map((r) => ({ ...toPlain(r), currentLeaseEnd: current.get(r.id, today, today).endDate || null, lateRent: late.has(r.id) }));
@@ -1488,7 +1650,7 @@ function vacantDays(propertyId, year, purchaseDate) {
     return 0;
   }
   let covered = 0;
-  for (const l of db.prepare('SELECT startDate, endDate FROM leases WHERE propertyId = ?').all(propertyId)) {
+  for (const l of db.prepare(`SELECT l.startDate, ${EFFECTIVE_END} AS endDate FROM leases l WHERE l.propertyId = ?`).all(propertyId)) {
     const s = l.startDate > from ? l.startDate : from;
     const e = l.endDate < last ? l.endDate : last;
     if (s <= e) {
@@ -1507,7 +1669,10 @@ function withItems(row) {
   // The HOA breakdown: how it is paid and the amount of each period (a single yearly amount if never set).
   const hoaFrequency = row.hoaFrequency || 'Yearly';
   const hoaAmounts = row.hoaAmounts ? JSON.parse(row.hoaAmounts) : [row.yearlyHoa];
-  return { ...row, hoaFrequency, hoaAmounts, repairItems, vacantDays: vacantDays(row.propertyId, row.year, row.purchaseDate) };
+  return {
+    ...row, hoaFrequency, hoaAmounts, repairItems, vacantDays: vacantDays(row.propertyId, row.year, row.purchaseDate),
+    specialIncome: specialIncome(row.propertyId, row.year)
+  };
 }
 
 // Replace a record's repair items with the given (already validated) list.
@@ -1730,9 +1895,9 @@ function latePayments(now = new Date()) {
   if (!report.pastGrace) {
     return report;
   }
-  const leases = db.prepare(`SELECT l.id, l.propertyId, l.startDate, l.endDate, l.monthlyRent, p.address, p.city, p.state
+  const leases = db.prepare(`SELECT l.id, l.propertyId, l.startDate, ${EFFECTIVE_END} AS endDate, l.monthlyRent, p.address, p.city, p.state
     FROM leases l JOIN properties p ON p.id = l.propertyId
-    WHERE l.startDate <= ? AND l.endDate >= ? ORDER BY p.address, p.city`).all(last, first);
+    WHERE l.startDate <= ? AND ${EFFECTIVE_END} >= ? ORDER BY p.address, p.city`).all(last, first);
   const paidFor = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM lease_payments
     WHERE leaseId = ? AND paymentType = 'Rent' AND forMonth = ?`);
   const names = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
@@ -1757,4 +1922,4 @@ function latePayments(now = new Date()) {
   return report;
 }
 
-module.exports = { latePayments, listYearPayments, addRentPayment, updateRentPayment, deleteRentPayment, getDeposit, saveDeposit, returnDeposit, init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listLookup, addLookup, updateLookup, deleteLookup, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, deleteTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, get, add, update, remove, copyFromYear };
+module.exports = { latePayments, listYearPayments, addRentPayment, updateRentPayment, deleteRentPayment, getDeposit, saveDeposit, returnDeposit, addSpecialPayment, updateSpecialPayment, deleteSpecialPayment, init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listLookup, addLookup, updateLookup, deleteLookup, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, deleteTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, get, add, update, remove, copyFromYear };
