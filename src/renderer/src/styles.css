@@ -924,6 +924,15 @@ tbody tr.row-expiring, tbody tr.row-expiring:hover { background: rgba(251, 146, 
 .payments-table .group-toggle { all: unset; display: flex; align-items: center; gap: 6px; width: 100%; cursor: pointer; font: inherit; }
 .payments-table .group-toggle:focus-visible { outline: 2px solid var(--primary, #2563eb); }
 .payments-table .chevron { display: inline-block; width: 1em; }
+/* Compact rows: smaller cell padding and icon buttons */
+.payments-table th, .payments-table td { padding: 1px 8px; font-size: 0.88rem; line-height: 1.2; }
+.payments-table .icon-btn { width: 26px; height: 26px; padding: 0; }
+.payments-table .icon-btn svg { width: 16px; height: 16px; }
+.payments-table .row-actions { white-space: nowrap; }
+.payments-table input, .payments-table select { padding: 2px 6px; }
+.payments-table .lease-row th { padding: 2px 8px; }
+.payments-scroll { max-height: 70vh; }
+.pay-card { padding: 8px 12px; margin-bottom: 10px; }
 
 .calc-scroll { max-height: 220px; overflow-y: auto; margin-bottom: 8px; }
 
