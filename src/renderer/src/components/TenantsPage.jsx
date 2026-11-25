@@ -91,6 +91,31 @@ function EditCell({ value, field, label, display, onCommit, ...rest }) {
 }
 
 /** Lists every tenant with all their stored information; the first seven columns edit in place. */
+// Tenants ordered by the purchase date of their active lease's property (oldest first, no lease last), then
+// by house so the tenants of one house sit together. `alt` flips from one house to the next, which the
+// table shows as alternating row backgrounds. A tenant without an active lease is a group of their own.
+function groupTenants(tenants) {
+  const houseKey = (tn) => (tn.activeLease ? `${tn.activeLease.address}|${tn.activeLease.city}`.toLowerCase() : '');
+  const sorted = [...tenants].sort((a, b) => {
+    const da = a.activeLease?.purchaseDate || '9999-99-99';
+    const db = b.activeLease?.purchaseDate || '9999-99-99';
+    if (da !== db) {
+      return da < db ? -1 : 1;
+    }
+    return houseKey(a) < houseKey(b) ? -1 : houseKey(a) > houseKey(b) ? 1 : 0;
+  });
+  let group = -1;
+  let previous = null;
+  return sorted.map((tn) => {
+    const key = houseKey(tn) || `no-lease-${tn.id}`;
+    if (key !== previous) {
+      group++;
+      previous = key;
+    }
+    return { tn, alt: group % 2 === 1 };
+  });
+}
+
 export default function TenantsPage() {
   const t = useT();
   const [tenants, setTenants] = useState(null); // null while loading
@@ -171,13 +196,8 @@ export default function TenantsPage() {
               </tr>
             </thead>
             <tbody>
-              {[...tenants].sort((a, b) => {
-                // By the purchase date of the active lease's property (oldest first); no date goes last.
-                const da = a.activeLease?.purchaseDate || '9999-99-99';
-                const db = b.activeLease?.purchaseDate || '9999-99-99';
-                return da < db ? -1 : da > db ? 1 : 0;
-              }).map((tn) => (
-                <tr key={tn.id}>
+              {groupTenants(tenants).map(({ tn, alt }) => (
+                <tr key={tn.id} className={alt ? 'group-alt' : undefined}>
                   <td className="keep-cell">
                     {!tn.hasLease && (
                       <button type="button" className="link drop-mark" onClick={() => removeTenant(tn)}

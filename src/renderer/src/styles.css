@@ -947,3 +947,8 @@ tbody tr.row-expiring, tbody tr.row-expiring:hover { background: rgba(251, 146, 
 .lease-table th:nth-child(5), .lease-table td:nth-child(5) { width: 150px; }
 .lease-table th:nth-child(6), .lease-table td:nth-child(6) { white-space: normal; min-width: 150px; }
 .lease-table th:nth-child(7), .lease-table td:nth-child(7) { width: 1%; white-space: nowrap; }
+
+/* Tenants page: tenants of one house share a background; it alternates white / light grey between houses */
+:root { --group-alt: #eceff5; }
+:root[data-theme="dark"] { --group-alt: #1f2940; }
+tbody tr.group-alt, tbody tr.group-alt:hover { background: var(--group-alt); }
