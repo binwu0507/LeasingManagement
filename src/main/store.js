@@ -1,0 +1,1925 @@
+// SQLite storage for properties (built-in node:sqlite, file in the app's userData folder).
+const fs = require('fs');
+const path = require('path');
+const { app } = require('electron');
+const { DatabaseSync } = require('node:sqlite');
+
+const SCHEMA_VERSION = 27;
+// A lease's last day for overlap, rent, vacancy and late checks: the move-out date once the lease was
+// ended early (earlyTermination = 1, set by store.js), otherwise the contract end date. Needs a `leases`
+// table or alias named `l`.
+const EFFECTIVE_END = `(CASE WHEN l.earlyTermination = 1 THEN l.moveOutDate ELSE l.endDate END)`;
+// Describe the house itself; stored once in `properties`.
+const PROPERTY_FIELDS = ['address', 'city', 'state', 'zip', 'bedrooms', 'bathrooms', 'sqft', 'purchaseDate'];
+// House fields as of schema v5 (used by the v5 migration, before purchaseDate existed).
+const V5_PROPERTY_FIELDS = PROPERTY_FIELDS.filter((f) => f !== 'purchaseDate');
+// Vary by year; stored per year in `property_years`.
+const YEAR_FIELDS = ['yearlyRent', 'propertyTax', 'yearlyHoa', 'mortgage', 'insurance', 'mortgageInterest'];
+
+// Joined view of one yearly record: `id` is the property_years id, `propertyId` the house.
+const SELECT_RECORD = `
+  SELECT y.id, y.propertyId, y.year, ${PROPERTY_FIELDS.map((f) => 'p.' + f).join(', ')},
+         ${YEAR_FIELDS.map((f) => 'y.' + f).join(', ')}, y.hoaFrequency, y.hoaAmounts,
+         (SELECT SUM(r.amount) FROM repair_items r WHERE r.propertyYearId = y.id) AS repairCost
+  FROM property_years y JOIN properties p ON p.id = y.propertyId`;
+
+let db = null;
+
+const isValidDate = (s) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  const dt = m && new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return Boolean(dt) && dt.getUTCMonth() === +m[2] - 1 && dt.getUTCDate() === +m[3];
+};
+
+// Normalize and check the itemized repair list. Date and amount are required per item.
+function cleanRepairItems(items) {
+  if (items === undefined || items === null) {
+    return [];
+  }
+  if (!Array.isArray(items)) {
+    throw new Error('Repair items must be a list.');
+  }
+  return items.map((item, i) => {
+    const n = i + 1;
+    const it = item || {};
+    const clean = {
+      date: typeof it.date === 'string' ? it.date.trim() : '',
+      amount: it.amount === '' || it.amount === null || it.amount === undefined ? NaN : Number(it.amount),
+      contractor: typeof it.contractor === 'string' ? it.contractor.trim() : '',
+      description: typeof it.description === 'string' ? it.description.trim() : ''
+    };
+    if (!isValidDate(clean.date)) {
+      throw new Error(`Repair item ${n}: date must be a valid date.`);
+    }
+    if (!Number.isFinite(clean.amount) || clean.amount < 0) {
+      throw new Error(`Repair item ${n}: amount must be a number, 0 or greater.`);
+    }
+    return clean;
+  });
+}
+
+// Every repair must be dated in the year of the record it belongs to.
+function assertRepairsInYear(items, year) {
+  items.forEach((it, i) => {
+    if (it.date.slice(0, 4) !== String(year)) {
+      throw new Error(`Repair item ${i + 1}: the date must be in ${year}.`);
+    }
+  });
+}
+
+// Normalize and check a property's leasing contracts. Start/end dates and rent are required;
+// move-in/move-out dates and tenant names are optional.
+function cleanLeases(leases) {
+  if (leases === undefined || leases === null) {
+    return [];
+  }
+  if (!Array.isArray(leases)) {
+    throw new Error('Leases must be a list.');
+  }
+  return leases.map((item, i) => {
+    const n = i + 1;
+    const it = item || {};
+    const text = (v) => (typeof v === 'string' ? v.trim() : '');
+    const clean = {
+      startDate: text(it.startDate),
+      endDate: text(it.endDate),
+      monthlyRent: it.monthlyRent === '' || it.monthlyRent === null || it.monthlyRent === undefined
+        ? NaN : Number(it.monthlyRent),
+      moveInDate: text(it.moveInDate) || null,
+      moveOutDate: text(it.moveOutDate) || null,
+      // Tenants linked to this lease; `occupying` says whether they live in the house under it.
+      tenants: []
+    };
+    const seen = new Set();
+    for (const t of Array.isArray(it.tenants) ? it.tenants : []) {
+      const tenantId = Number((t || {}).tenantId);
+      if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        throw new Error(`Lease ${n}: invalid tenant.`);
+      }
+      if (!seen.has(tenantId)) {
+        seen.add(tenantId);
+        clean.tenants.push({ tenantId, occupying: Boolean(t.occupying) });
+      }
+    }
+    if (!isValidDate(clean.startDate)) {
+      throw new Error(`Lease ${n}: start date must be a valid date.`);
+    }
+    if (!isValidDate(clean.endDate)) {
+      throw new Error(`Lease ${n}: end date must be a valid date.`);
+    }
+    if (clean.endDate < clean.startDate) {
+      throw new Error(`Lease ${n}: end date cannot be before the start date.`);
+    }
+    if (!Number.isFinite(clean.monthlyRent) || clean.monthlyRent < 0) {
+      throw new Error(`Lease ${n}: monthly rent must be a number, 0 or greater.`);
+    }
+    if (clean.moveInDate !== null && !isValidDate(clean.moveInDate)) {
+      throw new Error(`Lease ${n}: move-in date must be a valid date (or left blank).`);
+    }
+    if (clean.moveOutDate !== null && !isValidDate(clean.moveOutDate)) {
+      throw new Error(`Lease ${n}: move-out date must be a valid date (or left blank).`);
+    }
+    if (clean.moveInDate && clean.moveOutDate && clean.moveOutDate < clean.moveInDate) {
+      throw new Error(`Lease ${n}: move-out date cannot be before the move-in date.`);
+    }
+    if (clean.moveInDate && clean.moveInDate < clean.startDate) {
+      throw new Error(`Lease ${n}: move-in date cannot be before the lease start date.`);
+    }
+    if (clean.moveOutDate && clean.moveOutDate > clean.endDate) {
+      throw new Error(`Lease ${n}: move-out date cannot be after the lease end date.`);
+    }
+    // Moving out before the contract end is an early termination; the app sets this, never the caller.
+    clean.earlyTermination = clean.moveOutDate !== null && clean.moveOutDate < clean.endDate ? 1 : 0;
+    clean.lastDay = clean.earlyTermination ? clean.moveOutDate : clean.endDate;
+    return clean;
+  });
+}
+
+function validate(data) {
+  const d = data || {};
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  const num = (v) => (v === '' || v === null || v === undefined ? NaN : Number(v));
+  // Optional number: blank means "not provided" (null); otherwise it must be valid.
+  const optNum = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
+
+  const clean = {
+    address: text(d.address),
+    city: text(d.city),
+    state: text(d.state),
+    zip: text(d.zip),
+    bedrooms: num(d.bedrooms),
+    bathrooms: num(d.bathrooms),
+    sqft: num(d.sqft),
+    purchaseDate: text(d.purchaseDate) || null,   // YYYY-MM-DD (optional)
+    yearlyRent: num(d.yearlyRent),
+    propertyTax: num(d.propertyTax),    // per year (required)
+    yearlyHoa: num(d.yearlyHoa),              // per year (required)
+    mortgage: num(d.mortgage),          // per month (required)
+    insurance: optNum(d.insurance),     // per year (optional)
+    repairItems: cleanRepairItems(d.repairItems),   // itemized repairs (optional; total is derived)
+    mortgageInterest: optNum(d.mortgageInterest) // per year (optional)
+  };
+
+  if (!clean.address) {
+    throw new Error('Address is required.');
+  }
+  if (!clean.city) {
+    throw new Error('City is required.');
+  }
+  if (clean.purchaseDate !== null) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(clean.purchaseDate);
+    const dt = m && new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    if (!dt || dt.getUTCMonth() !== +m[2] - 1 || dt.getUTCDate() !== +m[3]) {
+      throw new Error('Purchase date must be a valid date (or left blank).');
+    }
+  }
+  for (const [field, label] of [
+    ['bedrooms', 'Bedrooms'],
+    ['bathrooms', 'Bathrooms'],
+    ['sqft', 'Square feet'],
+    ['yearlyRent', 'Yearly rent'],
+    ['propertyTax', 'Property tax'],
+    ['yearlyHoa', 'Yearly HOA fee'],
+    ['mortgage', 'Monthly mortgage']
+  ]) {
+    if (!Number.isFinite(clean[field]) || clean[field] < 0) {
+      throw new Error(`${label} must be a number, 0 or greater.`);
+    }
+  }
+  for (const [field, label] of [
+    ['insurance', 'Insurance'],
+    ['mortgageInterest', 'Mortgage interest']
+  ]) {
+    if (clean[field] !== null && (!Number.isFinite(clean[field]) || clean[field] < 0)) {
+      throw new Error(`${label} must be a number, 0 or greater (or left blank).`);
+    }
+  }
+  return clean;
+}
+
+// Open the database and create/migrate the schema.
+// `dbPath` is for tests (a temp file or ':memory:'); the app uses its userData folder.
+function init(dbPath) {
+  if (db) {
+    return;
+  }
+  const file = dbPath || path.join(app.getPath('userData'), 'leasing.db');
+  db = new DatabaseSync(file);
+  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+
+  const { user_version: version } = db.prepare('PRAGMA user_version').get();
+  if (version >= 1 && version < SCHEMA_VERSION) {
+    // Existing data is about to be migrated: keep a copy of the database as it was.
+    const backup = `${file}.bak-v${version}`;
+    if (file !== ':memory:' && !fs.existsSync(backup)) {
+      db.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
+    }
+  }
+  if (version < 1) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS properties (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        address TEXT NOT NULL,
+        city TEXT NOT NULL,
+        state TEXT,
+        zip TEXT,
+        bedrooms REAL NOT NULL,
+        bathrooms REAL NOT NULL,
+        sqft REAL NOT NULL,
+        monthlyRent REAL NOT NULL,
+        propertyTax REAL NOT NULL,
+        hoaFee REAL NOT NULL,
+        mortgage REAL NOT NULL,
+        insurance REAL,
+        repairCost REAL
+      );
+    `);
+  }
+  if (version < 2) {
+    // Records are organized by year. Existing rows move into the current year.
+    const currentYear = new Date().getFullYear();
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS years (year INTEGER PRIMARY KEY);
+      ALTER TABLE properties ADD COLUMN year INTEGER NOT NULL DEFAULT ${currentYear};
+      CREATE INDEX IF NOT EXISTS idx_properties_year ON properties (year);
+      INSERT OR IGNORE INTO years (year) SELECT DISTINCT year FROM properties;
+    `);
+  }
+  if (version < 3) {
+    // propertyId ties together the yearly records of the same house.
+    // Backfill: existing rows with the same address/city/zip share one propertyId.
+    db.exec(`
+      ALTER TABLE properties ADD COLUMN propertyId INTEGER;
+      UPDATE properties SET propertyId = (
+        SELECT MIN(p2.id) FROM properties p2
+        WHERE lower(p2.address) = lower(properties.address)
+          AND lower(p2.city) = lower(properties.city)
+          AND lower(COALESCE(p2.zip, '')) = lower(COALESCE(properties.zip, ''))
+      );
+      CREATE INDEX IF NOT EXISTS idx_properties_propertyId ON properties (propertyId);
+    `);
+  }
+  if (version < 4) {
+    // Split the flat table: `properties` holds each house once, `property_years` holds its
+    // yearly figures. Ids are preserved: properties.id = old propertyId, property_years.id = old id.
+    // A house's descriptive fields come from its most recent year.
+    db.exec('BEGIN');
+    try {
+      db.exec(`
+        ALTER TABLE properties RENAME TO properties_old;
+        CREATE TABLE properties (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          address TEXT NOT NULL,
+          city TEXT NOT NULL,
+          state TEXT,
+          zip TEXT,
+          bedrooms REAL NOT NULL,
+          bathrooms REAL NOT NULL,
+          sqft REAL NOT NULL
+        );
+        CREATE TABLE property_years (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          propertyId INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+          year INTEGER NOT NULL REFERENCES years(year),
+          monthlyRent REAL NOT NULL,
+          propertyTax REAL NOT NULL,
+          hoaFee REAL NOT NULL,
+          mortgage REAL NOT NULL,
+          insurance REAL,
+          repairCost REAL
+        );
+        INSERT INTO properties (id, address, city, state, zip, bedrooms, bathrooms, sqft)
+          SELECT o.propertyId, o.address, o.city, o.state, o.zip, o.bedrooms, o.bathrooms, o.sqft
+          FROM properties_old o
+          WHERE o.id = (
+            SELECT o2.id FROM properties_old o2
+            WHERE o2.propertyId = o.propertyId ORDER BY o2.year DESC, o2.id DESC LIMIT 1
+          );
+        INSERT INTO property_years (id, propertyId, year, monthlyRent, propertyTax, hoaFee, mortgage, insurance, repairCost)
+          SELECT id, propertyId, year, monthlyRent, propertyTax, hoaFee, mortgage, insurance, repairCost
+          FROM properties_old;
+        DROP TABLE properties_old;
+        CREATE INDEX idx_property_years_year ON property_years (year);
+        CREATE INDEX idx_property_years_property ON property_years (propertyId);
+        CREATE INDEX idx_properties_address ON properties (lower(address), lower(city));
+      `);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+  if (version < 5) {
+    migrateToV5();
+  }
+  if (version < 6) {
+    db.exec('ALTER TABLE properties ADD COLUMN purchaseDate TEXT');
+  }
+  if (version < 7) {
+    db.exec(`ALTER TABLE property_years ADD COLUMN mortgageInterest REAL
+             CHECK (mortgageInterest IS NULL OR mortgageInterest >= 0)`);
+  }
+  if (version < 8) {
+    migrateToV8();
+  }
+  if (version < 9) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS leases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        propertyId INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+        startDate TEXT NOT NULL,
+        endDate TEXT NOT NULL,
+        monthlyRent REAL NOT NULL CHECK (monthlyRent >= 0),
+        moveInDate TEXT,
+        moveOutDate TEXT,
+        tenantNames TEXT NOT NULL DEFAULT ''
+      );
+      CREATE INDEX IF NOT EXISTS idx_leases_property ON leases (propertyId);
+    `);
+  }
+  if (version < 10) {
+    // Tenants are people (unique by SSN) linked to leases. The old free-text
+    // leases.tenantNames column is left in place but no longer used.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tenants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        firstName TEXT NOT NULL CHECK (length(trim(firstName)) > 0),
+        lastName TEXT NOT NULL CHECK (length(trim(lastName)) > 0),
+        gender TEXT,
+        ssn TEXT NOT NULL UNIQUE,
+        dateOfBirth TEXT,
+        phone TEXT,
+        email TEXT
+      );
+      CREATE TABLE IF NOT EXISTS lease_tenants (
+        leaseId INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+        tenantId INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        PRIMARY KEY (leaseId, tenantId)
+      );
+      CREATE INDEX IF NOT EXISTS idx_lease_tenants_tenant ON lease_tenants (tenantId);
+    `);
+  }
+  if (version < 11) {
+    // A tenant stays linked to the lease; `occupying` marks whether they live in the house under it.
+    db.exec(`ALTER TABLE lease_tenants ADD COLUMN occupying INTEGER NOT NULL DEFAULT 1
+             CHECK (occupying IN (0, 1))`);
+  }
+  if (version < 12) {
+    // The signed residential lease agreement (one file per lease), stored inside the database.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lease_agreements (
+        leaseId INTEGER PRIMARY KEY REFERENCES leases(id) ON DELETE CASCADE,
+        fileName TEXT NOT NULL,
+        data BLOB NOT NULL
+      );
+    `);
+  }
+  if (version < 13) {
+    // Any number of supporting documents per lease, stored inside the database.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lease_documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        leaseId INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+        fileName TEXT NOT NULL,
+        data BLOB NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_lease_documents_lease ON lease_documents (leaseId);
+    `);
+  }
+  if (version < 14) {
+    // Previously uploaded lease agreements become ordinary leasing documents.
+    db.exec(`
+      INSERT INTO lease_documents (leaseId, fileName, data)
+        SELECT leaseId, fileName, data FROM lease_agreements;
+      DELETE FROM lease_agreements;
+    `);
+  }
+  if (version < 15) {
+    // Admin-managed list of leasing document types.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS document_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+      );
+      INSERT OR IGNORE INTO document_types (name) VALUES
+        ('Residential Lease Agreement'), ('Addendum'), ('Move-in Inspection'), ('Other');
+    `);
+  }
+  if (version < 16) {
+    // Each leasing document has a type (kept as NULL if the type is later deleted).
+    db.exec(`
+      ALTER TABLE lease_documents ADD COLUMN typeId INTEGER REFERENCES document_types(id) ON DELETE SET NULL;
+      UPDATE lease_documents SET typeId = (SELECT id FROM document_types WHERE name = 'Residential Lease Agreement');
+    `);
+  }
+  if (version < 17) {
+    // Driver's license details (all optional).
+    db.exec(`
+      ALTER TABLE tenants ADD COLUMN licenseNumber TEXT;
+      ALTER TABLE tenants ADD COLUMN licenseState TEXT;
+      ALTER TABLE tenants ADD COLUMN licenseIssueDate TEXT;
+      ALTER TABLE tenants ADD COLUMN licenseExpireDate TEXT;
+    `);
+  }
+  if (version < 18) {
+    // Rent and HOA are now yearly amounts (a property can sit vacant for months): rename the
+    // columns and convert the stored monthly values to yearly ones.
+    db.exec(`
+      ALTER TABLE leases RENAME COLUMN monthlyRent TO yearlyRent;
+      UPDATE leases SET yearlyRent = yearlyRent * 12;
+      ALTER TABLE property_years RENAME COLUMN monthlyRent TO yearlyRent;
+      ALTER TABLE property_years RENAME COLUMN hoaFee TO yearlyHoa;
+      UPDATE property_years SET yearlyRent = yearlyRent * 12, yearlyHoa = yearlyHoa * 12;
+    `);
+  }
+  if (version < 19) {
+    // A lease's rent is a monthly amount again (only the property-year rent is yearly).
+    db.exec(`
+      ALTER TABLE leases RENAME COLUMN yearlyRent TO monthlyRent;
+      UPDATE leases SET monthlyRent = monthlyRent / 12;
+    `);
+  }
+  if (version < 20) {
+    // Payments from tenants against a lease. A rent payment says whether it covers a full month
+    // or a prorated one; a security deposit (at most one per lease) can later be returned.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lease_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        leaseId INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+        paymentType TEXT NOT NULL CHECK (paymentType IN ('Rent', 'Security Deposit')),
+        rentKind TEXT CHECK (rentKind IN ('Full Month', 'Prorate')),
+        amount REAL NOT NULL CHECK (amount >= 0),
+        paymentDate TEXT NOT NULL,
+        returnedDate TEXT,
+        returnedAmount REAL CHECK (returnedAmount IS NULL OR returnedAmount >= 0),
+        CHECK ((paymentType = 'Rent') = (rentKind IS NOT NULL)),
+        CHECK (paymentType = 'Security Deposit' OR returnedDate IS NULL)
+      );
+      CREATE INDEX IF NOT EXISTS idx_lease_payments_lease ON lease_payments (leaseId);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_one_deposit_per_lease
+        ON lease_payments (leaseId) WHERE paymentType = 'Security Deposit';
+    `);
+  }
+  if (version < 21) {
+    // How the tenant paid. Nullable only so payments saved before this step stay valid;
+    // new and edited payments must have one (see validatePayment).
+    db.exec(`
+      ALTER TABLE lease_payments ADD COLUMN paymentMethod TEXT
+        CHECK (paymentMethod IS NULL OR paymentMethod IN ('Check', 'Zelle', 'Direct Deposit', 'Apple Pay', 'Venmo', 'eBay'));
+    `);
+  }
+  if (version < 22) {
+    // Admin-managed lists for the Financial card: where rent is deposited, and how tenants can pay.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS receiving_banks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+      );
+      CREATE TABLE IF NOT EXISTS payment_methods (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+      );
+      INSERT OR IGNORE INTO payment_methods (name) VALUES
+        ('Check'), ('Zelle'), ('Direct Deposit'), ('Apple Pay'), ('Venmo'), ('eBay');
+    `);
+  }
+  if (version < 23) {
+    // Payments reference the admin-managed payment_methods list instead of holding the method as
+    // text. The table is rebuilt (SQLite cannot drop a CHECK-constrained column); payments saved
+    // without a method keep a NULL one. A method that payments use cannot be deleted (RESTRICT).
+    db.exec(`
+      BEGIN;
+      CREATE TABLE lease_payments_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        leaseId INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+        paymentType TEXT NOT NULL CHECK (paymentType IN ('Rent', 'Security Deposit')),
+        rentKind TEXT CHECK (rentKind IN ('Full Month', 'Prorate')),
+        amount REAL NOT NULL CHECK (amount >= 0),
+        paymentDate TEXT NOT NULL,
+        returnedDate TEXT,
+        returnedAmount REAL CHECK (returnedAmount IS NULL OR returnedAmount >= 0),
+        paymentMethodId INTEGER REFERENCES payment_methods(id) ON DELETE RESTRICT,
+        CHECK ((paymentType = 'Rent') = (rentKind IS NOT NULL)),
+        CHECK (paymentType = 'Security Deposit' OR returnedDate IS NULL)
+      );
+      INSERT INTO lease_payments_new
+        (id, leaseId, paymentType, rentKind, amount, paymentDate, returnedDate, returnedAmount, paymentMethodId)
+        SELECT p.id, p.leaseId, p.paymentType, p.rentKind, p.amount, p.paymentDate, p.returnedDate, p.returnedAmount,
+          (SELECT m.id FROM payment_methods m WHERE m.name = p.paymentMethod)
+        FROM lease_payments p;
+      DROP TABLE lease_payments;
+      ALTER TABLE lease_payments_new RENAME TO lease_payments;
+      CREATE INDEX idx_lease_payments_lease ON lease_payments (leaseId);
+      CREATE UNIQUE INDEX idx_one_deposit_per_lease
+        ON lease_payments (leaseId) WHERE paymentType = 'Security Deposit';
+      COMMIT;
+    `);
+  }
+  if (version < 24) {
+    // Which bank received the payment. Nullable only so payments saved before this step stay valid;
+    // new and edited payments must have one (see validatePayment). A bank in use cannot be deleted.
+    db.exec(`
+      ALTER TABLE lease_payments ADD COLUMN receivingBankId INTEGER REFERENCES receiving_banks(id) ON DELETE RESTRICT;
+    `);
+  }
+  if (version < 25) {
+    // The month ("YYYY-MM") a rent payment is for, which can differ from the date it was received
+    // (prepaid or late rent). Existing rent payments are assumed to be for the month they were made.
+    db.exec(`
+      ALTER TABLE lease_payments ADD COLUMN forMonth TEXT;
+      UPDATE lease_payments SET forMonth = substr(paymentDate, 1, 7) WHERE paymentType = 'Rent';
+    `);
+  }
+  if (version < 26) {
+    // How a year's HOA is paid (Yearly, Half-Yearly or Monthly) and the amount of each period, as a
+    // JSON array. yearlyHoa stays the stored total, so reports and net income are unchanged.
+    db.exec(`
+      ALTER TABLE property_years ADD COLUMN hoaFrequency TEXT;
+      ALTER TABLE property_years ADD COLUMN hoaAmounts TEXT;
+    `);
+  }
+  if (version < 27) {
+    // Early termination and special income. A lease ended before its contract end date carries a flag
+    // (existing leases stay 0, so old display-only move-out dates change nothing). Special income items
+    // (early termination charge, pet charge, late fee, ...) are lease payments of the new type 'Special'
+    // with a category from an admin-managed list. The table is rebuilt because the paymentType CHECK changes.
+    db.exec(`
+      BEGIN;
+      ALTER TABLE leases ADD COLUMN earlyTermination INTEGER NOT NULL DEFAULT 0 CHECK (earlyTermination IN (0, 1));
+      CREATE TABLE special_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+      );
+      INSERT INTO special_categories (name) VALUES
+        ('Early Termination Charge'), ('Pet Charge'), ('Late Fee'), ('Other');
+      CREATE TABLE lease_payments_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        leaseId INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+        paymentType TEXT NOT NULL CHECK (paymentType IN ('Rent', 'Security Deposit', 'Special')),
+        rentKind TEXT CHECK (rentKind IN ('Full Month', 'Prorate')),
+        amount REAL NOT NULL CHECK (amount >= 0),
+        paymentDate TEXT NOT NULL,
+        returnedDate TEXT,
+        returnedAmount REAL CHECK (returnedAmount IS NULL OR returnedAmount >= 0),
+        paymentMethodId INTEGER REFERENCES payment_methods(id) ON DELETE RESTRICT,
+        receivingBankId INTEGER REFERENCES receiving_banks(id) ON DELETE RESTRICT,
+        forMonth TEXT,
+        specialCategoryId INTEGER REFERENCES special_categories(id) ON DELETE RESTRICT,
+        CHECK ((paymentType = 'Rent') = (rentKind IS NOT NULL)),
+        CHECK (paymentType = 'Security Deposit' OR returnedDate IS NULL),
+        CHECK ((paymentType = 'Special') = (specialCategoryId IS NOT NULL))
+      );
+      INSERT INTO lease_payments_new
+        (id, leaseId, paymentType, rentKind, amount, paymentDate, returnedDate, returnedAmount,
+         paymentMethodId, receivingBankId, forMonth)
+        SELECT id, leaseId, paymentType, rentKind, amount, paymentDate, returnedDate, returnedAmount,
+         paymentMethodId, receivingBankId, forMonth FROM lease_payments;
+      DROP TABLE lease_payments;
+      ALTER TABLE lease_payments_new RENAME TO lease_payments;
+      CREATE INDEX idx_lease_payments_lease ON lease_payments (leaseId);
+      CREATE UNIQUE INDEX idx_one_deposit_per_lease
+        ON lease_payments (leaseId) WHERE paymentType = 'Security Deposit';
+      COMMIT;
+    `);
+  }
+  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+const HOA_PERIODS = { Yearly: 1, 'Half-Yearly': 2, Monthly: 12 };
+
+// Normalize and check the HOA breakdown; returns null when the caller did not send one.
+function cleanHoa(data) {
+  if (data.hoaFrequency === undefined) {
+    return null;
+  }
+  const count = HOA_PERIODS[data.hoaFrequency];
+  if (!count) {
+    throw new Error('HOA frequency must be Yearly, Half-Yearly or Monthly.');
+  }
+  const list = Array.isArray(data.hoaAmounts) ? data.hoaAmounts : [];
+  const amounts = Array.from({ length: count }, (_, i) => {
+    const raw = list[i];
+    const n = raw === '' || raw === null || raw === undefined ? 0 : Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error('HOA amounts must be zero or more.');
+    }
+    return Math.round(n * 100) / 100;
+  });
+  return { frequency: data.hoaFrequency, amounts, total: Math.round(amounts.reduce((s, a) => s + a, 0) * 100) / 100 };
+}
+
+const PAYMENT_TYPES = ['Rent', 'Security Deposit', 'Special'];
+const RENT_KINDS = ['Full Month', 'Prorate'];
+
+// Normalize and check a payment: amount, date, type and (for rent) whether it is a full or prorated month.
+function validatePayment(data) {
+  const d = data || {};
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  const clean = {
+    paymentType: text(d.paymentType),
+    rentKind: text(d.rentKind) || null,
+    amount: d.amount === '' || d.amount === null || d.amount === undefined ? NaN : Number(d.amount),
+    paymentDate: text(d.paymentDate),
+    paymentMethodId: Number(d.paymentMethodId),
+    receivingBankId: Number(d.receivingBankId),
+    forMonth: text(d.forMonth) || null,
+    specialCategoryId: d.specialCategoryId === undefined || d.specialCategoryId === null ? null : Number(d.specialCategoryId)
+  };
+  if (!db.prepare('SELECT 1 FROM payment_methods WHERE id = ?').get(clean.paymentMethodId)) {
+    throw new Error('Choose a payment method.');
+  }
+  if (!db.prepare('SELECT 1 FROM receiving_banks WHERE id = ?').get(clean.receivingBankId)) {
+    throw new Error('Choose a receiving bank.');
+  }
+  if (!PAYMENT_TYPES.includes(clean.paymentType)) {
+    throw new Error('Payment type must be Rent, Security Deposit or Special.');
+  }
+  if (clean.paymentType === 'Special') {
+    if (!db.prepare('SELECT 1 FROM special_categories WHERE id = ?').get(clean.specialCategoryId)) {
+      throw new Error('Choose a category.');
+    }
+  } else {
+    clean.specialCategoryId = null;
+  }
+  if (clean.paymentType === 'Rent' && !RENT_KINDS.includes(clean.rentKind)) {
+    throw new Error('A rent payment must be Full Month or Prorate.');
+  }
+  if (clean.paymentType !== 'Rent') {
+    clean.rentKind = null;
+    clean.forMonth = null;
+  } else if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(clean.forMonth || '')) {
+    throw new Error('Choose the month this rent is for.');
+  }
+  if (!Number.isFinite(clean.amount) || clean.amount < 0) {
+    throw new Error('Payment amount must be a number, 0 or greater.');
+  }
+  if (!isValidDate(clean.paymentDate)) {
+    throw new Error('Payment date must be a valid date.');
+  }
+  return clean;
+}
+
+const TENANT_FIELDS = ['firstName', 'lastName', 'gender', 'ssn', 'dateOfBirth', 'phone', 'email',
+  'licenseNumber', 'licenseState', 'licenseIssueDate', 'licenseExpireDate'];
+const GENDERS = ['Male', 'Female', 'Other'];
+
+function validateTenant(data) {
+  const d = data || {};
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  const clean = {
+    firstName: text(d.firstName),
+    lastName: text(d.lastName),
+    gender: text(d.gender) || null,
+    ssn: text(d.ssn),
+    dateOfBirth: text(d.dateOfBirth) || null,
+    phone: text(d.phone) || null,
+    email: text(d.email) || null,
+    licenseNumber: text(d.licenseNumber) || null,
+    licenseState: text(d.licenseState).toUpperCase() || null,
+    licenseIssueDate: text(d.licenseIssueDate) || null,
+    licenseExpireDate: text(d.licenseExpireDate) || null
+  };
+  if (!clean.firstName) {
+    throw new Error('First name is required.');
+  }
+  if (!clean.lastName) {
+    throw new Error('Last name is required.');
+  }
+  if (clean.gender !== null && !GENDERS.includes(clean.gender)) {
+    throw new Error('Gender must be Male, Female or Other.');
+  }
+  const digits = clean.ssn.replace(/[\s-]/g, '');
+  if (!/^\d{9}$/.test(digits)) {
+    throw new Error('SSN must be 9 digits (e.g. 123-45-6789).');
+  }
+  clean.ssn = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+  if (clean.phone !== null) {
+    const p = clean.phone.replace(/\D/g, '');
+    if (!/^\d{10}$/.test(p)) {
+      throw new Error('Phone must be 10 digits (e.g. (555) 123-4567), or left blank.');
+    }
+    clean.phone = `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}`;
+  }
+  if (clean.dateOfBirth !== null && !isValidDate(clean.dateOfBirth)) {
+    throw new Error('Date of birth must be a valid date (or left blank).');
+  }
+  if (clean.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean.email)) {
+    throw new Error('Email must be a valid address (or left blank).');
+  }
+  if (clean.licenseNumber !== null && clean.licenseNumber.length > 30) {
+    throw new Error("Driver's license number is too long (30 characters maximum).");
+  }
+  if (clean.licenseState !== null && !/^[A-Z]{2}$/.test(clean.licenseState)) {
+    throw new Error("Driver's license state must be a 2-letter state code (or left blank).");
+  }
+  for (const [key, label] of [['licenseIssueDate', 'issue date'], ['licenseExpireDate', 'expiration date']]) {
+    if (clean[key] !== null && !isValidDate(clean[key])) {
+      throw new Error(`Driver's license ${label} must be a valid date (or left blank).`);
+    }
+  }
+  if (clean.licenseIssueDate && clean.licenseExpireDate && clean.licenseExpireDate < clean.licenseIssueDate) {
+    throw new Error("Driver's license expiration date cannot be before the issue date.");
+  }
+  return clean;
+}
+
+// Each tenant, with `activeLease` ({ address, city, startDate, endDate } or null): the lease
+// linked to them whose term (inclusive) contains today.
+// Every lease a tenant is linked to (newest first), with the property address and the names
+// of all tenants on each lease.
+function tenantLeaseHistory(tenantId) {
+  const names = db.prepare(`
+    SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
+    WHERE lt.leaseId = ? ORDER BY lower(t.lastName), lower(t.firstName), t.id
+  `);
+  return db.prepare(`
+    SELECT l.id, l.startDate, l.endDate, l.monthlyRent, p.address, p.city
+    FROM lease_tenants lt
+    JOIN leases l ON l.id = lt.leaseId
+    JOIN properties p ON p.id = l.propertyId
+    WHERE lt.tenantId = ?
+    ORDER BY l.startDate DESC, l.id DESC
+  `).all(tenantId).map((l) => ({
+    ...toPlain(l),
+    tenantNames: names.all(l.id).map((n) => `${n.firstName} ${n.lastName}`)
+  }));
+}
+
+function listTenants() {
+  const t = new Date();
+  const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  const active = db.prepare(`
+    SELECT p.address, p.city, p.purchaseDate, l.startDate, ${EFFECTIVE_END} AS endDate
+    FROM lease_tenants lt
+    JOIN leases l ON l.id = lt.leaseId
+    JOIN properties p ON p.id = l.propertyId
+    WHERE lt.tenantId = ? AND l.startDate <= ? AND ${EFFECTIVE_END} >= ?
+    ORDER BY l.startDate DESC LIMIT 1
+  `);
+  // `hasLease`: linked to any lease (past, current or future), so the record is real data worth keeping.
+  return db.prepare(`SELECT id, ${TENANT_FIELDS.join(', ')},
+      EXISTS (SELECT 1 FROM lease_tenants lt WHERE lt.tenantId = tenants.id) AS hasLease
+    FROM tenants ORDER BY lower(lastName), lower(firstName), id`)
+    .all().map((r) => {
+      const lease = active.get(r.id, today, today);
+      return { ...toPlain(r), hasLease: !!r.hasLease, activeLease: lease ? toPlain(lease) : null };
+    });
+}
+
+// Only a tenant not linked to any lease can be deleted.
+function deleteTenant(id) {
+  if (!db.prepare('SELECT 1 FROM tenants WHERE id = ?').get(id)) {
+    throw new Error('Tenant not found.');
+  }
+  if (db.prepare('SELECT 1 FROM lease_tenants WHERE tenantId = ?').get(id)) {
+    throw new Error('This tenant is on a lease and cannot be deleted.');
+  }
+  db.prepare('DELETE FROM tenants WHERE id = ?').run(id);
+}
+
+// Existing tenants sharing the given SSN, phone or email (formatting ignored), each with the
+// list of fields that matched. Used to ask whether a new tenant is really an existing person.
+function findTenantMatches(data) {
+  const d = data || {};
+  const digits = (v) => (typeof v === 'string' ? v.replace(/\D/g, '') : '');
+  const ssn = digits(d.ssn);
+  const phone = digits(d.phone);
+  const email = typeof d.email === 'string' ? d.email.trim().toLowerCase() : '';
+  const matches = [];
+  for (const t of listTenants()) {
+    const matchedOn = [];
+    if (ssn.length === 9 && digits(t.ssn) === ssn) {
+      matchedOn.push('SSN');
+    }
+    if (phone.length === 10 && digits(t.phone) === phone) {
+      matchedOn.push('phone');
+    }
+    if (email && t.email && t.email.toLowerCase() === email) {
+      matchedOn.push('email');
+    }
+    if (matchedOn.length) {
+      matches.push({ ...t, matchedOn });
+    }
+  }
+  return matches;
+}
+
+function addTenant(data) {
+  const clean = validateTenant(data);
+  if (db.prepare('SELECT 1 FROM tenants WHERE ssn = ?').get(clean.ssn)) {
+    throw new Error('A tenant with that SSN already exists.');
+  }
+  const cols = TENANT_FIELDS.join(', ');
+  const params = TENANT_FIELDS.map((f) => '@' + f).join(', ');
+  const { lastInsertRowid } = db.prepare(`INSERT INTO tenants (${cols}) VALUES (${params})`).run(clean);
+  return toPlain(db.prepare(`SELECT id, ${cols} FROM tenants WHERE id = ?`).get(Number(lastInsertRowid)));
+}
+
+function updateTenant(id, data) {
+  const clean = validateTenant(data);
+  if (!db.prepare('SELECT 1 FROM tenants WHERE id = ?').get(id)) {
+    throw new Error('Tenant not found.');
+  }
+  if (db.prepare('SELECT 1 FROM tenants WHERE ssn = ? AND id <> ?').get(clean.ssn, id)) {
+    throw new Error('A tenant with that SSN already exists.');
+  }
+  const sets = TENANT_FIELDS.map((f) => `${f} = @${f}`).join(', ');
+  db.prepare(`UPDATE tenants SET ${sets} WHERE id = @id`).run({ ...clean, id });
+  return toPlain(db.prepare(`SELECT id, ${TENANT_FIELDS.join(', ')} FROM tenants WHERE id = ?`).get(id));
+}
+
+// v5: make the database enforce what the app only checked before.
+//  - one `properties` row per address/city/zip (case-insensitive)
+//  - one `property_years` row per house per year
+//  - CHECK constraints mirroring validate()
+// Existing duplicates are merged first, keeping the lowest id:
+//  - duplicate houses: their year records move to the survivor, which takes the
+//    descriptive fields of the most recently added duplicate
+//  - duplicate (house, year) records: the extras are deleted and logged
+function migrateToV5() {
+  // Foreign keys must be off while tables are rebuilt (and the pragma is a no-op inside a transaction).
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('BEGIN');
+  try {
+    const houseKey = `lower(address), lower(city), lower(COALESCE(zip, ''))`;
+    const dupHouses = db.prepare(`
+      SELECT group_concat(id) AS ids FROM properties GROUP BY ${houseKey} HAVING COUNT(*) > 1
+    `).all();
+    for (const { ids } of dupHouses) {
+      const all = ids.split(',').map(Number).sort((a, b) => a - b);
+      const keep = all[0];
+      const newest = db.prepare('SELECT * FROM properties WHERE id = ?').get(all[all.length - 1]);
+      setPropertyFields(keep, newest, V5_PROPERTY_FIELDS);
+      for (const id of all.slice(1)) {
+        db.prepare('UPDATE property_years SET propertyId = ? WHERE propertyId = ?').run(keep, id);
+        db.prepare('DELETE FROM properties WHERE id = ?').run(id);
+      }
+    }
+
+    const dupYears = db.prepare(`
+      SELECT group_concat(id) AS ids FROM property_years GROUP BY propertyId, year HAVING COUNT(*) > 1
+    `).all();
+    for (const { ids } of dupYears) {
+      for (const id of ids.split(',').map(Number).sort((a, b) => a - b).slice(1)) {
+        const row = db.prepare('SELECT * FROM property_years WHERE id = ?').get(id);
+        console.warn('Migration v5: removed duplicate yearly record', JSON.stringify(row));
+        db.prepare('DELETE FROM property_years WHERE id = ?').run(id);
+      }
+    }
+
+    db.exec(`
+      CREATE TABLE properties_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        address TEXT NOT NULL CHECK (length(trim(address)) > 0),
+        city TEXT NOT NULL CHECK (length(trim(city)) > 0),
+        state TEXT,
+        zip TEXT,
+        bedrooms REAL NOT NULL CHECK (bedrooms >= 0),
+        bathrooms REAL NOT NULL CHECK (bathrooms >= 0),
+        sqft REAL NOT NULL CHECK (sqft >= 0)
+      );
+      CREATE TABLE property_years_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        propertyId INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+        year INTEGER NOT NULL REFERENCES years(year) CHECK (year BETWEEN 1900 AND 2200),
+        monthlyRent REAL NOT NULL CHECK (monthlyRent >= 0),
+        propertyTax REAL NOT NULL CHECK (propertyTax >= 0),
+        hoaFee REAL NOT NULL CHECK (hoaFee >= 0),
+        mortgage REAL NOT NULL CHECK (mortgage >= 0),
+        insurance REAL CHECK (insurance IS NULL OR insurance >= 0),
+        repairCost REAL CHECK (repairCost IS NULL OR repairCost >= 0)
+      );
+      INSERT INTO properties_new SELECT id, address, city, state, zip, bedrooms, bathrooms, sqft FROM properties;
+      INSERT INTO property_years_new
+        SELECT id, propertyId, year, monthlyRent, propertyTax, hoaFee, mortgage, insurance, repairCost
+        FROM property_years;
+      DROP TABLE property_years;
+      DROP TABLE properties;
+      ALTER TABLE properties_new RENAME TO properties;
+      ALTER TABLE property_years_new RENAME TO property_years;
+      CREATE UNIQUE INDEX idx_properties_identity
+        ON properties (lower(address), lower(city), lower(COALESCE(zip, '')));
+      CREATE UNIQUE INDEX idx_property_years_unique ON property_years (propertyId, year);
+      CREATE INDEX idx_property_years_year ON property_years (year);
+    `);
+    if (db.prepare('PRAGMA foreign_key_check').all().length > 0) {
+      throw new Error('Migration v5 left foreign key violations.');
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
+// v8: repair cost becomes a list of items (`repair_items`); the yearly repair cost is their
+// sum, so the stored `repairCost` column is dropped. An existing non-zero repairCost becomes
+// one item dated Jan 1 of its year.
+function migrateToV8() {
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE property_years_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        propertyId INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+        year INTEGER NOT NULL REFERENCES years(year) CHECK (year BETWEEN 1900 AND 2200),
+        monthlyRent REAL NOT NULL CHECK (monthlyRent >= 0),
+        propertyTax REAL NOT NULL CHECK (propertyTax >= 0),
+        hoaFee REAL NOT NULL CHECK (hoaFee >= 0),
+        mortgage REAL NOT NULL CHECK (mortgage >= 0),
+        insurance REAL CHECK (insurance IS NULL OR insurance >= 0),
+        mortgageInterest REAL CHECK (mortgageInterest IS NULL OR mortgageInterest >= 0)
+      );
+      INSERT INTO property_years_new
+        SELECT id, propertyId, year, monthlyRent, propertyTax, hoaFee, mortgage, insurance, mortgageInterest
+        FROM property_years;
+      CREATE TABLE repair_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        propertyYearId INTEGER NOT NULL REFERENCES property_years_new(id) ON DELETE CASCADE,
+        date TEXT NOT NULL,
+        amount REAL NOT NULL CHECK (amount >= 0),
+        contractor TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT ''
+      );
+      INSERT INTO repair_items (propertyYearId, date, amount, contractor, description)
+        SELECT id, printf('%04d-01-01', year), repairCost, '', 'Migrated repair cost'
+        FROM property_years WHERE repairCost IS NOT NULL AND repairCost > 0;
+      DROP TABLE property_years;
+      ALTER TABLE property_years_new RENAME TO property_years;
+      CREATE UNIQUE INDEX idx_property_years_unique ON property_years (propertyId, year);
+      CREATE INDEX idx_property_years_year ON property_years (year);
+      CREATE INDEX idx_property_years_property ON property_years (propertyId);
+      CREATE INDEX idx_repair_items_year ON repair_items (propertyYearId);
+    `);
+    if (db.prepare('PRAGMA foreign_key_check').all().length > 0) {
+      throw new Error('Migration v8 left foreign key violations.');
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
+function close() {
+  if (db) {
+    db.close();
+  }
+  db = null;
+}
+
+function validYear(v) {
+  const year = Number(v);
+  if (!Number.isInteger(year) || year < 1900 || year > 2200) {
+    throw new Error('Year must be a whole number between 1900 and 2200.');
+  }
+  return year;
+}
+
+const toPlain = (row) => ({ ...row });
+
+function listYears() {
+  return db.prepare('SELECT year FROM years ORDER BY year DESC').all().map((r) => r.year);
+}
+
+function addYear(value) {
+  const year = validYear(value);
+  db.prepare('INSERT OR IGNORE INTO years (year) VALUES (?)').run(year);
+  return year;
+}
+
+const SELECT_HOUSE = `SELECT id, ${PROPERTY_FIELDS.join(', ')} FROM properties`;
+
+// `agreementName` is the uploaded lease agreement's file name, or null when there is none.
+// `fileCount` is the number of downloadable files (agreement + documents).
+const SELECT_LEASE = `SELECT id, startDate, endDate, monthlyRent, moveInDate, moveOutDate, earlyTermination,
+  (SELECT COUNT(*) FROM lease_payments s WHERE s.leaseId = leases.id AND s.paymentType = 'Special'
+    AND s.specialCategoryId = (SELECT id FROM special_categories WHERE name = 'Early Termination Charge')) AS terminationChargeCount,
+  (SELECT SUM(s.amount) FROM lease_payments s WHERE s.leaseId = leases.id AND s.paymentType = 'Special'
+    AND s.specialCategoryId = (SELECT id FROM special_categories WHERE name = 'Early Termination Charge')) AS terminationCharge,
+  (SELECT fileName FROM lease_agreements a WHERE a.leaseId = leases.id) AS agreementName,
+  (SELECT COUNT(*) FROM lease_agreements a WHERE a.leaseId = leases.id)
+    + (SELECT COUNT(*) FROM lease_documents d WHERE d.leaseId = leases.id) AS fileCount FROM leases`;
+
+// A lease row plus its linked tenants.
+function withTenants(l) {
+  return {
+    ...toPlain(l),
+    tenants: db.prepare('SELECT tenantId, occupying FROM lease_tenants WHERE leaseId = ? ORDER BY tenantId')
+      .all(l.id).map((r) => ({ tenantId: r.tenantId, occupying: r.occupying === 1 }))
+  };
+}
+
+// A property's leasing contracts (oldest first), each with its tenants.
+function listLeases(propertyId) {
+  return db.prepare(`${SELECT_LEASE} WHERE propertyId = ? ORDER BY startDate, id`).all(propertyId).map(withTenants);
+}
+
+// Replace a lease's tenant links with the given (already validated) list.
+function setLeaseTenants(leaseId, tenants) {
+  const { startDate, endDate } = db.prepare(`SELECT startDate, ${EFFECTIVE_END} AS endDate FROM leases l WHERE id = ?`).get(leaseId);
+  // A person cannot be on two leases whose terms overlap (dates are inclusive; an early-terminated
+  // lease ends at its move-out date).
+  const clash = db.prepare(`
+    SELECT l.startDate, ${EFFECTIVE_END} AS endDate, p.address, p.city
+    FROM lease_tenants lt
+    JOIN leases l ON l.id = lt.leaseId
+    JOIN properties p ON p.id = l.propertyId
+    WHERE lt.tenantId = ? AND l.id <> ? AND l.startDate <= ? AND ${EFFECTIVE_END} >= ?
+    ORDER BY l.startDate LIMIT 1
+  `);
+  const nameOf = db.prepare('SELECT firstName, lastName FROM tenants WHERE id = ?');
+  for (const t of tenants) {
+    const c = clash.get(t.tenantId, leaseId, endDate, startDate);
+    if (c) {
+      const n = nameOf.get(t.tenantId);
+      throw new Error(`${n.firstName} ${n.lastName} is already on a lease at ${c.address}, ${c.city} `
+        + `(${c.startDate} to ${c.endDate}) that overlaps this lease term (${startDate} to ${endDate}).`);
+    }
+  }
+  db.prepare('DELETE FROM lease_tenants WHERE leaseId = ?').run(leaseId);
+  const link = db.prepare('INSERT INTO lease_tenants (leaseId, tenantId, occupying) VALUES (?, ?, ?)');
+  const exists = db.prepare('SELECT 1 FROM tenants WHERE id = ?');
+  for (const t of tenants) {
+    if (!exists.get(t.tenantId)) {
+      throw new Error('A selected tenant no longer exists.');
+    }
+    link.run(leaseId, t.tenantId, t.occupying ? 1 : 0);
+  }
+}
+
+// A property cannot have two leases whose terms overlap (dates inclusive).
+function assertNoPropertyOverlap(propertyId, excludeLeaseId, startDate, endDate) {
+  const c = db.prepare(`
+    SELECT l.startDate, ${EFFECTIVE_END} AS endDate FROM leases l
+    WHERE l.propertyId = ? AND l.id <> ? AND l.startDate <= ? AND ${EFFECTIVE_END} >= ?
+    ORDER BY l.startDate LIMIT 1
+  `).get(propertyId, excludeLeaseId, endDate, startDate);
+  if (c) {
+    throw new Error(`This lease term (${startDate} to ${endDate}) overlaps an existing lease of this property `
+      + `(${c.startDate} to ${c.endDate}).`);
+  }
+}
+
+// Leases are saved on their own, independent of the property's own details.
+function addLease(propertyId, data) {
+  const [clean] = cleanLeases([data]);
+  if (!db.prepare('SELECT 1 FROM properties WHERE id = ?').get(propertyId)) {
+    throw new Error('Property not found.');
+  }
+  assertNoPropertyOverlap(propertyId, -1, clean.startDate, clean.lastDay);
+  db.exec('BEGIN');
+  try {
+    const { lastInsertRowid } = db.prepare(`
+      INSERT INTO leases (propertyId, startDate, endDate, monthlyRent, moveInDate, moveOutDate, earlyTermination)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(propertyId, clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate,
+      clean.earlyTermination);
+    setLeaseTenants(Number(lastInsertRowid), clean.tenants);
+    db.exec('COMMIT');
+    return withTenants(db.prepare(`${SELECT_LEASE} WHERE id = ?`).get(Number(lastInsertRowid)));
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+// The category every early termination charge uses (seeded by migration v27, protected by name in the UI text).
+const TERMINATION_CATEGORY = 'Early Termination Charge';
+const terminationChargeCount = (leaseId, exceptPaymentId = -1) => db.prepare(`
+  SELECT COUNT(*) AS n FROM lease_payments
+  WHERE leaseId = ? AND id <> ? AND paymentType = 'Special'
+    AND specialCategoryId = (SELECT id FROM special_categories WHERE name = ?)`).get(leaseId, exceptPaymentId, TERMINATION_CATEGORY).n;
+
+function updateLease(id, data) {
+  const [clean] = cleanLeases([data]);
+  const existing = db.prepare('SELECT propertyId, earlyTermination FROM leases WHERE id = ?').get(id);
+  if (!existing) {
+    throw new Error('Lease not found.');
+  }
+  assertNoPropertyOverlap(existing.propertyId, id, clean.startDate, clean.lastDay);
+  // Removing the early move-out while an early termination charge is recorded would leave a charge on a
+  // lease that did not end early: the caller must say the charge is to be deleted.
+  const dropsCharge = existing.earlyTermination === 1 && clean.earlyTermination === 0 && terminationChargeCount(id) > 0;
+  if (dropsCharge && !(data && data.deleteTerminationCharge === true)) {
+    throw new Error('This lease has an early termination charge. Confirm deleting it to remove the early move-out.');
+  }
+  db.exec('BEGIN');
+  try {
+    if (dropsCharge) {
+      db.prepare(`DELETE FROM lease_payments WHERE leaseId = ? AND paymentType = 'Special'
+        AND specialCategoryId = (SELECT id FROM special_categories WHERE name = ?)`).run(id, TERMINATION_CATEGORY);
+    }
+    db.prepare(`
+      UPDATE leases SET startDate = ?, endDate = ?, monthlyRent = ?, moveInDate = ?, moveOutDate = ?, earlyTermination = ?
+      WHERE id = ?
+    `).run(clean.startDate, clean.endDate, clean.monthlyRent, clean.moveInDate, clean.moveOutDate,
+      clean.earlyTermination, id);
+    setLeaseTenants(id, clean.tenants);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return withTenants(db.prepare(`${SELECT_LEASE} WHERE id = ?`).get(id));
+}
+
+function deleteLease(id) {
+  if (db.prepare('DELETE FROM leases WHERE id = ?').run(id).changes === 0) {
+    throw new Error('Lease not found.');
+  }
+}
+
+// Payments (rent and deposits) of a property's leases dated in the given year, newest first.
+function listYearPayments(propertyId, yearValue) {
+  const year = validYear(yearValue);
+  const names = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
+    WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`);
+  return db.prepare(`
+    SELECT pay.id, pay.leaseId, pay.paymentType, pay.rentKind, pay.amount, pay.paymentDate, pay.forMonth, pay.paymentMethodId,
+      pm.name AS paymentMethod, pay.receivingBankId, rb.name AS receivingBank, pay.returnedDate, pay.returnedAmount, l.startDate, ${EFFECTIVE_END} AS endDate,
+      pay.specialCategoryId, sc.name AS specialCategory
+    FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
+    LEFT JOIN special_categories sc ON sc.id = pay.specialCategoryId
+    LEFT JOIN payment_methods pm ON pm.id = pay.paymentMethodId
+    LEFT JOIN receiving_banks rb ON rb.id = pay.receivingBankId
+    WHERE l.propertyId = ? AND (
+      (pay.paymentType = 'Rent' AND substr(pay.forMonth, 1, 4) = ?)
+      OR (pay.paymentType <> 'Rent' AND (substr(pay.paymentDate, 1, 4) = ? OR substr(pay.returnedDate, 1, 4) = ?)))
+    ORDER BY pay.paymentDate DESC, pay.id DESC
+  `).all(propertyId, String(year), String(year), String(year)).map((r) => ({
+    ...toPlain(r),
+    tenantNames: names.all(r.leaseId).map((n) => `${n.firstName} ${n.lastName}`)
+  }));
+}
+
+// Rent can only be recorded for a month the lease covers at least in part (dates inclusive).
+function assertMonthInLease(leaseId, forMonth) {
+  const { startDate, endDate } = db.prepare(`SELECT startDate, ${EFFECTIVE_END} AS endDate FROM leases l WHERE id = ?`).get(leaseId);
+  const [y, m] = forMonth.split('-').map(Number);
+  const first = `${forMonth}-01`;
+  const last = `${forMonth}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
+  if (startDate > last || endDate < first) {
+    throw new Error(`The lease (${startDate} to ${endDate}) does not cover ${forMonth}.`);
+  }
+}
+
+// A rent payment belongs to the year of the month it is for (it may be received in another year).
+function assertPaymentInYear(clean, yearValue) {
+  const year = validYear(yearValue);
+  if (clean.forMonth.slice(0, 4) !== String(year)) {
+    throw new Error(`The month must be in ${year}.`);
+  }
+}
+
+// The yearly rent of a house-year is the rent actually received: its rent payments dated in the
+// year up to today. Pass `propertyId` to recompute one house (even down to 0 after deleting its last
+// payment), or null to refresh every house that has rent payments in the year (keeps the figure in
+// step as payment dates pass, and leaves records that never had payments alone).
+function syncYearRent(propertyId, year) {
+  const rentIn = `FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
+    WHERE l.propertyId = property_years.propertyId AND pay.paymentType = 'Rent'
+      AND substr(pay.paymentDate, 1, 4) = CAST(property_years.year AS TEXT)`;
+  db.prepare(`UPDATE property_years SET yearlyRent =
+      (SELECT COALESCE(SUM(pay.amount), 0) ${rentIn} AND pay.paymentDate <= date('now', 'localtime'))
+    WHERE year = ? ${propertyId === null ? `AND EXISTS (SELECT 1 ${rentIn})` : 'AND propertyId = ?'}`)
+    .run(...(propertyId === null ? [year] : [year, propertyId]));
+}
+
+// Records a rent payment against a lease (deposits are handled by saveDeposit).
+function addRentPayment(leaseId, yearValue, data) {
+  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
+    throw new Error('Lease not found.');
+  }
+  const clean = validatePayment({ ...(data || {}), paymentType: 'Rent' });
+  assertPaymentInYear(clean, yearValue);
+  assertMonthInLease(leaseId, clean.forMonth);
+  db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethodId, receivingBankId, forMonth)
+    VALUES (?, 'Rent', ?, ?, ?, ?, ?, ?)`)
+    .run(leaseId, clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, clean.forMonth);
+  const year = validYear(yearValue);
+  // Income counts in the year the money was received, which may differ from the month it is for.
+  syncYearRent(db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(leaseId).propertyId, Number(clean.paymentDate.slice(0, 4)));
+  return paymentChange('added', leaseId, year, null, clean);
+}
+
+const bankName = (id) => {
+  const row = id == null ? null : db.prepare('SELECT name FROM receiving_banks WHERE id = ?').get(id);
+  return row ? row.name : null;
+};
+const methodName = (id) => {
+  const row = id == null ? null : db.prepare('SELECT name FROM payment_methods WHERE id = ?').get(id);
+  return row ? row.name : null;
+};
+
+// What changed, for the notification email: the house, lease, tenants, the payment before/after
+// (null when it did not exist) and the year's rent received so far.
+function paymentChange(action, leaseId, year, before, after) {
+  const lease = db.prepare(`SELECT l.propertyId, l.startDate, l.endDate, p.address, p.city, p.state
+    FROM leases l JOIN properties p ON p.id = l.propertyId WHERE l.id = ?`).get(leaseId);
+  const tenantNames = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
+    WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`).all(leaseId).map((n) => `${n.firstName} ${n.lastName}`);
+  const rec = db.prepare('SELECT yearlyRent FROM property_years WHERE propertyId = ? AND year = ?').get(lease.propertyId, year);
+  const shape = (p) => (p ? { rentKind: p.rentKind, amount: p.amount, paymentDate: p.paymentDate, forMonth: p.forMonth,
+    paymentMethod: methodName(p.paymentMethodId), receivingBank: bankName(p.receivingBankId) } : null);
+  return {
+    action, year, address: lease.address, city: lease.city, state: lease.state,
+    leaseStart: lease.startDate, leaseEnd: lease.endDate, tenantNames,
+    before: shape(before), after: shape(after), yearlyRent: rec ? rec.yearlyRent : null
+  };
+}
+
+function updateRentPayment(id, yearValue, data) {
+  const before = db.prepare(`SELECT leaseId, rentKind, amount, paymentDate, forMonth, paymentMethodId, receivingBankId FROM lease_payments
+    WHERE id = ? AND paymentType = 'Rent'`).get(id);
+  if (!before) {
+    throw new Error('Rent payment not found.');
+  }
+  const clean = validatePayment({ ...(data || {}), paymentType: 'Rent' });
+  assertPaymentInYear(clean, yearValue);
+  if (clean.forMonth !== before.forMonth) {
+    assertMonthInLease(before.leaseId, clean.forMonth); // a payment saved before this rule may keep its month
+  }
+  db.prepare('UPDATE lease_payments SET rentKind = ?, amount = ?, paymentDate = ?, paymentMethodId = ?, receivingBankId = ?, forMonth = ? WHERE id = ?')
+    .run(clean.rentKind, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, clean.forMonth, id);
+  const year = validYear(yearValue);
+  const propertyId = db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(before.leaseId).propertyId;
+  for (const y of new Set([before.paymentDate.slice(0, 4), clean.paymentDate.slice(0, 4)])) {
+    syncYearRent(propertyId, Number(y));
+  }
+  return paymentChange('updated', before.leaseId, year, before, clean);
+}
+
+function deleteRentPayment(id) {
+  const row = db.prepare(`SELECT pay.leaseId, l.propertyId, pay.rentKind, pay.amount, pay.paymentDate, pay.forMonth, pay.paymentMethodId, pay.receivingBankId
+    FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId
+    WHERE pay.id = ? AND pay.paymentType = 'Rent'`).get(id);
+  if (!row) {
+    return null;
+  }
+  const year = Number(row.paymentDate.slice(0, 4));
+  db.prepare('DELETE FROM lease_payments WHERE id = ?').run(id);
+  syncYearRent(row.propertyId, year);
+  return paymentChange('deleted', row.leaseId, year, row, null);
+}
+
+// Security deposit of a lease: { id, amount, paymentDate, returnedDate, returnedAmount } or null.
+function getDeposit(leaseId) {
+  const row = db.prepare(`SELECT pay.id, pay.amount, pay.paymentDate, pay.paymentMethodId, pm.name AS paymentMethod,
+      pay.receivingBankId, rb.name AS receivingBank, pay.returnedDate, pay.returnedAmount
+    FROM lease_payments pay LEFT JOIN payment_methods pm ON pm.id = pay.paymentMethodId
+    LEFT JOIN receiving_banks rb ON rb.id = pay.receivingBankId
+    WHERE pay.leaseId = ? AND pay.paymentType = 'Security Deposit'`).get(leaseId);
+  return row ? toPlain(row) : null;
+}
+
+// Records the lease's security deposit, or edits it if one was already paid (never a second one).
+function saveDeposit(leaseId, data) {
+  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
+    throw new Error('Lease not found.');
+  }
+  const clean = validatePayment({ ...(data || {}), paymentType: 'Security Deposit' });
+  const existing = getDeposit(leaseId);
+  if (existing) {
+    db.prepare('UPDATE lease_payments SET amount = ?, paymentDate = ?, paymentMethodId = ?, receivingBankId = ? WHERE id = ?')
+      .run(clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, existing.id);
+  } else {
+    db.prepare(`INSERT INTO lease_payments (leaseId, paymentType, rentKind, amount, paymentDate, paymentMethodId, receivingBankId)
+      VALUES (?, 'Security Deposit', NULL, ?, ?, ?, ?)`)
+      .run(leaseId, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId);
+  }
+  return getDeposit(leaseId);
+}
+
+// Marks the paid deposit as returned to the tenant (amount may be less after deductions).
+function returnDeposit(leaseId, data) {
+  const deposit = getDeposit(leaseId);
+  if (!deposit) {
+    throw new Error('No security deposit has been paid on this lease.');
+  }
+  const d = data || {};
+  const returnedDate = typeof d.returnedDate === 'string' ? d.returnedDate.trim() : '';
+  const returnedAmount = d.returnedAmount === '' || d.returnedAmount === null || d.returnedAmount === undefined
+    ? NaN : Number(d.returnedAmount);
+  if (!isValidDate(returnedDate)) {
+    throw new Error('Return date must be a valid date.');
+  }
+  if (returnedDate < deposit.paymentDate) {
+    throw new Error('The return date cannot be before the payment date.');
+  }
+  if (!Number.isFinite(returnedAmount) || returnedAmount < 0 || returnedAmount > deposit.amount) {
+    throw new Error('Returned amount must be between 0 and the deposit amount.');
+  }
+  db.prepare('UPDATE lease_payments SET returnedDate = ?, returnedAmount = ? WHERE id = ?')
+    .run(returnedDate, returnedAmount, deposit.id);
+  return getDeposit(leaseId);
+}
+
+// Special income (early termination charge, pet charge, late fee, ...): one-off income items tied to a
+// lease, counted in the property-year of their payment date. Never rent, never late.
+function specialYearCheck(leaseId, paymentDate) {
+  const { propertyId } = db.prepare('SELECT propertyId FROM leases WHERE id = ?').get(leaseId);
+  const has = db.prepare('SELECT 1 FROM property_years WHERE propertyId = ? AND year = ?')
+    .get(propertyId, Number(paymentDate.slice(0, 4)));
+  // The item is saved either way and counts once the house is added to that year.
+  return { yearMissing: !has };
+}
+
+// An early termination charge exists only on a lease that ended early, once.
+function assertTerminationCharge(leaseId, clean, paymentId = -1) {
+  const cat = db.prepare('SELECT name FROM special_categories WHERE id = ?').get(clean.specialCategoryId);
+  if (!cat || cat.name !== TERMINATION_CATEGORY) {
+    return;
+  }
+  if (!db.prepare('SELECT earlyTermination FROM leases WHERE id = ?').get(leaseId).earlyTermination) {
+    throw new Error('This lease did not end early. Set the move-out date before the lease end date first.');
+  }
+  if (terminationChargeCount(leaseId, paymentId) > 0) {
+    throw new Error('This lease already has an early termination charge; edit it instead.');
+  }
+}
+
+function addSpecialPayment(leaseId, data) {
+  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
+    throw new Error('Lease not found.');
+  }
+  const clean = validatePayment({ ...(data || {}), paymentType: 'Special' });
+  assertTerminationCharge(leaseId, clean);
+  const { lastInsertRowid } = db.prepare(`INSERT INTO lease_payments
+    (leaseId, paymentType, amount, paymentDate, paymentMethodId, receivingBankId, specialCategoryId)
+    VALUES (?, 'Special', ?, ?, ?, ?, ?)`)
+    .run(leaseId, clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, clean.specialCategoryId);
+  return { id: Number(lastInsertRowid), ...specialYearCheck(leaseId, clean.paymentDate) };
+}
+
+function updateSpecialPayment(id, data) {
+  const before = db.prepare(`SELECT leaseId FROM lease_payments WHERE id = ? AND paymentType = 'Special'`).get(id);
+  if (!before) {
+    throw new Error('Special income item not found.');
+  }
+  const clean = validatePayment({ ...(data || {}), paymentType: 'Special' });
+  assertTerminationCharge(before.leaseId, clean, id);
+  db.prepare(`UPDATE lease_payments SET amount = ?, paymentDate = ?, paymentMethodId = ?, receivingBankId = ?,
+    specialCategoryId = ? WHERE id = ?`)
+    .run(clean.amount, clean.paymentDate, clean.paymentMethodId, clean.receivingBankId, clean.specialCategoryId, id);
+  return { id, ...specialYearCheck(before.leaseId, clean.paymentDate) };
+}
+
+function deleteSpecialPayment(id) {
+  db.prepare(`DELETE FROM lease_payments WHERE id = ? AND paymentType = 'Special'`).run(id);
+}
+
+// Special income of a house-year: special items by payment date, plus security deposits received (by
+// payment date) minus the amounts returned (by returned date).
+function specialIncome(propertyId, year) {
+  const y = String(year);
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN pay.paymentType IN ('Special', 'Security Deposit') AND substr(pay.paymentDate, 1, 4) = ?
+        THEN pay.amount END), 0)
+      - COALESCE(SUM(CASE WHEN pay.paymentType = 'Security Deposit' AND substr(pay.returnedDate, 1, 4) = ?
+        THEN pay.returnedAmount END), 0) AS total
+    FROM lease_payments pay JOIN leases l ON l.id = pay.leaseId WHERE l.propertyId = ?
+  `).get(y, y, propertyId);
+  return Math.round(row.total * 100) / 100;
+}
+
+const MAX_AGREEMENT_BYTES =25 * 1024 * 1024;
+
+function setLeaseAgreement(leaseId, fileName, data) {
+  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
+    throw new Error('Lease not found.');
+  }
+  if (data.length === 0) {
+    throw new Error('That file is empty.');
+  }
+  if (data.length > MAX_AGREEMENT_BYTES) {
+    throw new Error('The file is too large (25 MB maximum).');
+  }
+  db.prepare(`INSERT INTO lease_agreements (leaseId, fileName, data) VALUES (?, ?, ?)
+              ON CONFLICT(leaseId) DO UPDATE SET fileName = excluded.fileName, data = excluded.data`)
+    .run(leaseId, fileName, data);
+  return withTenants(db.prepare(`${SELECT_LEASE} WHERE id = ?`).get(leaseId));
+}
+
+// { fileName, data: Buffer } or null
+function getLeaseAgreement(leaseId) {
+  const row = db.prepare('SELECT fileName, data FROM lease_agreements WHERE leaseId = ?').get(leaseId);
+  return row ? { fileName: row.fileName, data: Buffer.from(row.data) } : null;
+}
+
+function removeLeaseAgreement(leaseId) {
+  db.prepare('DELETE FROM lease_agreements WHERE leaseId = ?').run(leaseId);
+}
+
+// Leasing documents: several files per lease. Lists never include the file bytes.
+function listLeaseDocuments(leaseId) {
+  return db.prepare(`SELECT d.id, d.fileName, d.typeId, t.name AS typeName FROM lease_documents d
+    LEFT JOIN document_types t ON t.id = d.typeId WHERE d.leaseId = ? ORDER BY d.id`).all(leaseId).map(toPlain);
+}
+
+function addLeaseDocument(leaseId, typeId, fileName, data) {
+  if (!db.prepare('SELECT 1 FROM document_types WHERE id = ?').get(typeId)) {
+    throw new Error('Choose a document type.');
+  }
+  if (!db.prepare('SELECT 1 FROM leases WHERE id = ?').get(leaseId)) {
+    throw new Error('Lease not found.');
+  }
+  if (data.length === 0) {
+    throw new Error('That file is empty.');
+  }
+  if (data.length > MAX_AGREEMENT_BYTES) {
+    throw new Error('The file is too large (25 MB maximum).');
+  }
+  db.prepare('INSERT INTO lease_documents (leaseId, typeId, fileName, data) VALUES (?, ?, ?, ?)').run(leaseId, typeId, fileName, data);
+  return listLeaseDocuments(leaseId);
+}
+
+// Replaces the file behind an existing document.
+function replaceLeaseDocument(docId, fileName, data) {
+  const row = db.prepare('SELECT leaseId FROM lease_documents WHERE id = ?').get(docId);
+  if (!row) {
+    throw new Error('Document not found.');
+  }
+  if (data.length === 0) {
+    throw new Error('That file is empty.');
+  }
+  if (data.length > MAX_AGREEMENT_BYTES) {
+    throw new Error('The file is too large (25 MB maximum).');
+  }
+  db.prepare('UPDATE lease_documents SET fileName = ?, data = ? WHERE id = ?').run(fileName, data, docId);
+  return listLeaseDocuments(row.leaseId);
+}
+
+// { fileName, data: Buffer } or null
+function getLeaseDocument(docId) {
+  const row = db.prepare('SELECT fileName, data FROM lease_documents WHERE id = ?').get(docId);
+  return row ? { fileName: row.fileName, data: Buffer.from(row.data) } : null;
+}
+
+function removeLeaseDocument(docId) {
+  const row = db.prepare('SELECT leaseId FROM lease_documents WHERE id = ?').get(docId);
+  db.prepare('DELETE FROM lease_documents WHERE id = ?').run(docId);
+  return row ? listLeaseDocuments(row.leaseId) : [];
+}
+
+// Every file of a lease (the agreement first, then the documents) for the "download all" zip.
+function getLeaseFiles(leaseId) {
+  const lease = db.prepare('SELECT startDate, endDate FROM leases WHERE id = ?').get(leaseId);
+  if (!lease) {
+    throw new Error('Lease not found.');
+  }
+  const files = [];
+  const agreement = getLeaseAgreement(leaseId);
+  if (agreement) {
+    files.push(agreement);
+  }
+  for (const row of db.prepare('SELECT fileName, data FROM lease_documents WHERE leaseId = ? ORDER BY id').all(leaseId)) {
+    files.push({ fileName: row.fileName, data: Buffer.from(row.data) });
+  }
+  return { startDate: lease.startDate, endDate: lease.endDate, files };
+}
+
+// Leasing document types (Admin screen).
+function cleanTypeName(name) {
+  const n = typeof name === 'string' ? name.trim() : '';
+  if (!n) {
+    throw new Error('Enter a document type name.');
+  }
+  if (n.length > 60) {
+    throw new Error('The name is too long (60 characters maximum).');
+  }
+  return n;
+}
+function listDocumentTypes() {
+  return db.prepare('SELECT id, name FROM document_types ORDER BY name COLLATE NOCASE').all().map(toPlain);
+}
+function addDocumentType(name) {
+  try {
+    db.prepare('INSERT INTO document_types (name) VALUES (?)').run(cleanTypeName(name));
+  } catch (err) {
+    throw new Error(/UNIQUE/.test(err.message) ? 'That document type already exists.' : err.message);
+  }
+  return listDocumentTypes();
+}
+function updateDocumentType(id, name) {
+  try {
+    if (db.prepare('UPDATE document_types SET name = ? WHERE id = ?').run(cleanTypeName(name), id).changes === 0) {
+      throw new Error('Document type not found.');
+    }
+  } catch (err) {
+    throw new Error(/UNIQUE/.test(err.message) ? 'That document type already exists.' : err.message);
+  }
+  return listDocumentTypes();
+}
+function deleteDocumentType(id) {
+  db.prepare('DELETE FROM document_types WHERE id = ?').run(id);
+  return listDocumentTypes();
+}
+
+// Receiving banks and payment methods (Admin > Financial): simple unique-name lists.
+const LOOKUPS = {
+  receivingBanks: { table: 'receiving_banks', label: 'receiving bank' },
+  paymentMethods: { table: 'payment_methods', label: 'payment method' },
+  specialCategories: { table: 'special_categories', label: 'special income category' }
+};
+function lookup(kind) {
+  const l = Object.hasOwn(LOOKUPS, kind) ? LOOKUPS[kind] : null;
+  if (!l) {
+    throw new Error('Unknown list.');
+  }
+  return l;
+}
+function cleanLookupName(l, name) {
+  const n = typeof name === 'string' ? name.trim() : '';
+  if (!n) {
+    throw new Error(`Enter a ${l.label} name.`);
+  }
+  if (n.length > 60) {
+    throw new Error('The name is too long (60 characters maximum).');
+  }
+  return n;
+}
+function listLookup(kind) {
+  const { table } = lookup(kind);
+  return db.prepare(`SELECT id, name FROM ${table} ORDER BY name COLLATE NOCASE`).all().map(toPlain);
+}
+function addLookup(kind, name) {
+  const l = lookup(kind);
+  try {
+    db.prepare(`INSERT INTO ${l.table} (name) VALUES (?)`).run(cleanLookupName(l, name));
+  } catch (err) {
+    throw new Error(/UNIQUE/.test(err.message) ? `That ${l.label} already exists.` : err.message);
+  }
+  return listLookup(kind);
+}
+function updateLookup(kind, id, name) {
+  const l = lookup(kind);
+  try {
+    if (db.prepare(`UPDATE ${l.table} SET name = ? WHERE id = ?`).run(cleanLookupName(l, name), id).changes === 0) {
+      throw new Error(`The ${l.label} was not found.`);
+    }
+  } catch (err) {
+    throw new Error(/UNIQUE/.test(err.message) ? `That ${l.label} already exists.` : err.message);
+  }
+  return listLookup(kind);
+}
+function deleteLookup(kind, id) {
+  const l = lookup(kind);
+  try {
+    db.prepare(`DELETE FROM ${l.table} WHERE id = ?`).run(id);
+  } catch (err) {
+    throw new Error(/FOREIGN KEY/.test(err.message) ? `This ${l.label} is used by payments and cannot be deleted.` : err.message);
+  }
+  return listLookup(kind);
+}
+
+// Houses (no yearly figures, no leases).
+// `currentLeaseEnd` is the end date of the lease covering today (latest end if several), or null = vacant.
+function listProperties() {
+  const t = new Date();
+  const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  const current = db.prepare(
+    `SELECT MAX(${EFFECTIVE_END}) AS endDate FROM leases l WHERE l.propertyId = ? AND l.startDate <= ? AND ${EFFECTIVE_END} >= ?`);
+  const late = new Set(latePayments().items.map((i) => i.propertyId)); // rent unpaid this month
+  return db.prepare(`${SELECT_HOUSE} ORDER BY lower(address), id`).all()
+    .map((r) => ({ ...toPlain(r), currentLeaseEnd: current.get(r.id, today, today).endDate || null, lateRent: late.has(r.id) }));
+}
+
+// Validate only the house fields; any yearly data in `data` is ignored (placeholders
+// stand in so the shared validator doesn't reject the missing/blank yearly values).
+function validateHouse(data) {
+  const placeholders = { yearlyRent: 0, propertyTax: 0, yearlyHoa: 0, mortgage: 0 };
+  return pick(validate({ ...pick(data || {}, PROPERTY_FIELDS), ...placeholders }), PROPERTY_FIELDS);
+}
+
+function houseClash(clean, exceptId) {
+  return db.prepare(`
+    SELECT 1 FROM properties
+    WHERE id != ? AND lower(address) = lower(?) AND lower(city) = lower(?) AND lower(COALESCE(zip, '')) = lower(?)
+  `).get(exceptId, clean.address, clean.city, clean.zip);
+}
+
+function addProperty(data) {
+  const clean = validateHouse(data);
+  if (houseClash(clean, -1)) {
+    throw new Error('A property with that address, city and zip already exists.');
+  }
+  const cols = PROPERTY_FIELDS.join(', ');
+  const params = PROPERTY_FIELDS.map((f) => '@' + f).join(', ');
+  const { lastInsertRowid } = db.prepare(`INSERT INTO properties (${cols}) VALUES (${params})`).run(clean);
+  return toPlain(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(Number(lastInsertRowid)));
+}
+
+function updateProperty(id, data) {
+  const clean = validateHouse(data);
+  if (!db.prepare('SELECT 1 FROM properties WHERE id = ?').get(id)) {
+    throw new Error('Property not found.');
+  }
+  if (houseClash(clean, id)) {
+    throw new Error('Another property already has that address, city and zip.');
+  }
+  setPropertyFields(id, clean);
+  return toPlain(db.prepare(`${SELECT_HOUSE} WHERE id = ?`).get(id));
+}
+
+function list(yearValue) {
+  const year = validYear(yearValue);
+  syncYearRent(null, year);
+  return db.prepare(`${SELECT_RECORD} WHERE y.year = ? ORDER BY y.id`).all(year).map(withItems);
+}
+
+function get(id) {
+  return withItems(db.prepare(`${SELECT_RECORD} WHERE y.id = ?`).get(id));
+}
+
+// Days of the year not covered by any lease of the house (lease dates inclusive). Leases of one
+// house never overlap, so their covered days can simply be added up. A house bought during the
+// year is only counted from its purchase date.
+function vacantDays(propertyId, year, purchaseDate) {
+  const day = (iso) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000;
+  const first = `${year}-01-01`;
+  const last = `${year}-12-31`;
+  const from = purchaseDate && purchaseDate > first ? purchaseDate : first;
+  if (from > last) {
+    return 0;
+  }
+  let covered = 0;
+  for (const l of db.prepare(`SELECT l.startDate, ${EFFECTIVE_END} AS endDate FROM leases l WHERE l.propertyId = ?`).all(propertyId)) {
+    const s = l.startDate > from ? l.startDate : from;
+    const e = l.endDate < last ? l.endDate : last;
+    if (s <= e) {
+      covered += day(e) - day(s) + 1;
+    }
+  }
+  return day(last) - day(from) + 1 - covered;
+}
+
+// A yearly record plus its itemized repairs (oldest first) and its vacant days.
+function withItems(row) {
+  const repairItems = db.prepare(`
+    SELECT id, date, amount, contractor, description FROM repair_items
+    WHERE propertyYearId = ? ORDER BY date, id
+  `).all(row.id).map(toPlain);
+  // The HOA breakdown: how it is paid and the amount of each period (a single yearly amount if never set).
+  const hoaFrequency = row.hoaFrequency || 'Yearly';
+  const hoaAmounts = row.hoaAmounts ? JSON.parse(row.hoaAmounts) : [row.yearlyHoa];
+  return {
+    ...row, hoaFrequency, hoaAmounts, repairItems, vacantDays: vacantDays(row.propertyId, row.year, row.purchaseDate),
+    specialIncome: specialIncome(row.propertyId, row.year)
+  };
+}
+
+// Replace a record's repair items with the given (already validated) list.
+function setRepairItems(yearRecordId, items) {
+  db.prepare('DELETE FROM repair_items WHERE propertyYearId = ?').run(yearRecordId);
+  const insert = db.prepare(`
+    INSERT INTO repair_items (propertyYearId, date, amount, contractor, description)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  for (const it of items) {
+    insert.run(yearRecordId, it.date, it.amount, it.contractor, it.description);
+  }
+}
+
+function pick(obj, fields) {
+  return Object.fromEntries(fields.map((f) => [f, obj[f]]));
+}
+
+function setPropertyFields(propertyId, clean, fields = PROPERTY_FIELDS) {
+  const sets = fields.map((f) => `${f} = @${f}`).join(', ');
+  db.prepare(`UPDATE properties SET ${sets} WHERE id = @id`).run({ ...pick(clean, fields), id: propertyId });
+}
+
+function add(yearValue, data) {
+  const year = validYear(yearValue);
+  const clean = validate(data);
+  assertRepairsInYear(clean.repairItems, year);
+  addYear(year);
+
+  // Same address/city/zip as an existing house -> same property; otherwise a new one.
+  const match = db.prepare(`
+    SELECT id FROM properties
+    WHERE lower(address) = lower(?) AND lower(city) = lower(?) AND lower(COALESCE(zip, '')) = lower(?)
+    ORDER BY id LIMIT 1
+  `).get(clean.address, clean.city, clean.zip);
+
+  db.exec('BEGIN');
+  try {
+    let propertyId;
+    if (match) {
+      propertyId = match.id;
+      if (db.prepare('SELECT 1 FROM property_years WHERE propertyId = ? AND year = ?').get(propertyId, year)) {
+        throw new Error(`This property already has a record for ${year}.`);
+      }
+      setPropertyFields(propertyId, clean);
+    } else {
+      const cols = PROPERTY_FIELDS.join(', ');
+      const params = PROPERTY_FIELDS.map((f) => '@' + f).join(', ');
+      propertyId = Number(db.prepare(`INSERT INTO properties (${cols}) VALUES (${params})`)
+        .run(pick(clean, PROPERTY_FIELDS)).lastInsertRowid);
+    }
+    const cols = ['propertyId', 'year', ...YEAR_FIELDS].join(', ');
+    const params = ['propertyId', 'year', ...YEAR_FIELDS].map((f) => '@' + f).join(', ');
+    const { lastInsertRowid } = db
+      .prepare(`INSERT INTO property_years (${cols}) VALUES (${params})`)
+      .run({ ...pick(clean, YEAR_FIELDS), propertyId, year });
+    setRepairItems(Number(lastInsertRowid), clean.repairItems);
+    db.exec('COMMIT');
+    return get(Number(lastInsertRowid));
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+// Updates only the yearly figures of a record; the year and the house itself never change
+// here (house details are edited from the home page).
+function update(id, data) {
+  // Placeholders stand in for the house fields so the shared validator checks the yearly ones.
+  const house = { address: 'x', city: 'x', bedrooms: 0, bathrooms: 0, sqft: 0 };
+  const hoa = cleanHoa(data || {});
+  const input = pick(data || {}, [...YEAR_FIELDS, 'repairItems']);
+  if (hoa) {
+    input.yearlyHoa = hoa.total; // the yearly figure is always the sum of the periods
+  }
+  const valid = validate({ ...house, ...input });
+  const clean = pick(valid, YEAR_FIELDS);
+  const record = db.prepare('SELECT year, yearlyHoa FROM property_years WHERE id = ?').get(id);
+  if (!record) {
+    throw new Error('Property not found.');
+  }
+  assertRepairsInYear(valid.repairItems, record.year);
+  // yearlyRent is derived from the rent payments (see syncYearRent), so it is never set here.
+  const editable = YEAR_FIELDS.filter((f) => f !== 'yearlyRent');
+  const sets = editable.map((f) => `${f} = @${f}`).join(', ');
+  db.exec('BEGIN');
+  try {
+    db.prepare(`UPDATE property_years SET ${sets} WHERE id = @id`).run({ ...pick(clean, editable), id });
+    if (hoa) {
+      db.prepare('UPDATE property_years SET hoaFrequency = ?, hoaAmounts = ? WHERE id = ?')
+        .run(hoa.frequency, JSON.stringify(hoa.amounts), id);
+    } else if (clean.yearlyHoa !== record.yearlyHoa) {
+      // The yearly HOA was edited directly (house form): the old breakdown no longer applies.
+      db.prepare('UPDATE property_years SET hoaFrequency = NULL, hoaAmounts = NULL WHERE id = ?').run(id);
+    }
+    if (Array.isArray((data || {}).repairItems)) { // omitted = leave the repair items alone
+      setRepairItems(id, valid.repairItems);
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return get(id);
+}
+
+// Deletes one year's record; the house itself goes once it has no records left.
+function remove(id) {
+  const record = db.prepare('SELECT propertyId FROM property_years WHERE id = ?').get(id);
+  if (!record) {
+    throw new Error('Property not found.');
+  }
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM property_years WHERE id = ?').run(id);
+    db.prepare(`DELETE FROM properties WHERE id = ?
+                AND NOT EXISTS (SELECT 1 FROM property_years WHERE propertyId = ?)`)
+      .run(record.propertyId, record.propertyId);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+// Add selected houses to another year. The house is shared, so only a new yearly record is
+// created, with monetary fields reset (required ones to 0, optional ones to null).
+// Houses already in the target year (same propertyId) are skipped.
+function copyFromYear(targetValue, sourceValue, ids) {
+  const target = validYear(targetValue);
+  const source = validYear(sourceValue);
+  if (target === source) {
+    throw new Error('Choose a different year to copy from.');
+  }
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new Error('Select at least one house.');
+  }
+
+  // A house is "already there" if the target year has a record of the same propertyId.
+  const existing = new Set(list(target).map((p) => p.propertyId));
+  const insert = db.prepare(`
+    INSERT INTO property_years (propertyId, year, yearlyRent, propertyTax, yearlyHoa, mortgage, insurance)
+    VALUES (@propertyId, @year, 0, 0, 0, 0, NULL)
+  `);
+  const wanted = new Set(ids.map(Number));
+  let copied = 0;
+  db.exec('BEGIN');
+  try {
+    addYear(target);
+    for (const p of list(source)) {
+      // Skip houses already there, without a purchase date, or bought after the target year
+      if (!wanted.has(p.id) || existing.has(p.propertyId)
+          || !p.purchaseDate || Number(p.purchaseDate.slice(0, 4)) > target) {
+        continue;
+      }
+      insert.run({ year: target, propertyId: p.propertyId });
+      existing.add(p.propertyId);
+      copied++;
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return copied;
+}
+
+// Add existing houses (by property id) to a year with a zeroed yearly record each.
+// Houses already in that year are skipped.
+function addHousesToYear(yearValue, propertyIds) {
+  const year = validYear(yearValue);
+  if (!Array.isArray(propertyIds) || propertyIds.length === 0) {
+    throw new Error('Select at least one property.');
+  }
+  const exists = db.prepare('SELECT purchaseDate FROM properties WHERE id = ?');
+  const has = db.prepare('SELECT 1 FROM property_years WHERE propertyId = ? AND year = ?');
+  const insert = db.prepare(`
+    INSERT INTO property_years (propertyId, year, yearlyRent, propertyTax, yearlyHoa, mortgage, insurance)
+    VALUES (?, ?, 0, 0, 0, 0, NULL)
+  `);
+  let added = 0;
+  db.exec('BEGIN');
+  try {
+    addYear(year);
+    for (const id of new Set(propertyIds.map(Number))) {
+      const house = exists.get(id);
+      // Skip unknown houses, ones without a purchase date or bought after this year, and ones already in it
+      if (!house || !house.purchaseDate || Number(house.purchaseDate.slice(0, 4)) > year || has.get(id, year)) {
+        continue;
+      }
+      insert.run(id, year);
+      added++;
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return added;
+}
+
+// Rent still owed for the current month, for the late-payment reminder. A lease is late when it covers
+// part of the month, more than LATE_AFTER_DAYS days have passed since the 1st (or since the lease
+// started within the month), and the rent payments made FOR this month add up to less than the rent
+// due. The rent due is the full monthly rent, or a prorated share when the lease covers only part of
+// the month (same calculation as the default amount in the payments dialog).
+const LATE_AFTER_DAYS = 4;
+function latePayments(now = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const month = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const first = `${month}-01`;
+  const last = `${month}-${pad(daysInMonth)}`;
+  const report = {
+    today: `${month}-${pad(now.getDate())}`,
+    monthLabel: now.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+    pastGrace: now.getDate() - 1 > LATE_AFTER_DAYS,
+    items: []
+  };
+  if (!report.pastGrace) {
+    return report;
+  }
+  const leases = db.prepare(`SELECT l.id, l.propertyId, l.startDate, ${EFFECTIVE_END} AS endDate, l.monthlyRent, p.address, p.city, p.state
+    FROM leases l JOIN properties p ON p.id = l.propertyId
+    WHERE l.startDate <= ? AND ${EFFECTIVE_END} >= ? ORDER BY p.address, p.city`).all(last, first);
+  const paidFor = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM lease_payments
+    WHERE leaseId = ? AND paymentType = 'Rent' AND forMonth = ?`);
+  const names = db.prepare(`SELECT t.firstName, t.lastName FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenantId
+    WHERE lt.leaseId = ? ORDER BY t.lastName, t.firstName`);
+  for (const l of leases) {
+    const from = l.startDate > first ? l.startDate : first;
+    const to = l.endDate < last ? l.endDate : last;
+    const covered = Number(to.slice(8)) - Number(from.slice(8)) + 1;
+    const due = covered >= daysInMonth ? l.monthlyRent : Math.round((l.monthlyRent * covered / daysInMonth) * 100) / 100;
+    // Rent is due from the start of the month, or from the day the lease starts within it.
+    if (now.getDate() - Number(from.slice(8)) <= LATE_AFTER_DAYS) {
+      continue;
+    }
+    const paid = paidFor.get(l.id, month).total;
+    if (paid + 0.005 < due) {
+      report.items.push({
+        propertyId: l.propertyId, address: l.address, city: l.city, state: l.state, leaseStart: l.startDate, leaseEnd: l.endDate,
+        rentDue: due, paid, tenantNames: names.all(l.id).map((n) => `${n.firstName} ${n.lastName}`)
+      });
+    }
+  }
+  return report;
+}
+
+module.exports = { latePayments, listYearPayments, addRentPayment, updateRentPayment, deleteRentPayment, getDeposit, saveDeposit, returnDeposit, addSpecialPayment, updateSpecialPayment, deleteSpecialPayment, init, close, addHousesToYear,listLeases, addLease, updateLease, deleteLease, setLeaseAgreement, getLeaseAgreement, removeLeaseAgreement, listLeaseDocuments, addLeaseDocument, replaceLeaseDocument, getLeaseDocument, removeLeaseDocument, getLeaseFiles, listDocumentTypes, addDocumentType, updateDocumentType, deleteDocumentType, listLookup, addLookup, updateLookup, deleteLookup, listTenants, tenantLeaseHistory, findTenantMatches, addTenant, updateTenant, deleteTenant, listYears, addYear, listProperties, addProperty, updateProperty, list, get, add, update, remove, copyFromYear };
